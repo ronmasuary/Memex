@@ -6,7 +6,7 @@ Memex is a solo project, but here's the process for anyone poking around.
 
 ```bash
 git clone https://github.com/ronmasuary/Memex.git
-cd memex
+cd Memex
 npm install
 ```
 
