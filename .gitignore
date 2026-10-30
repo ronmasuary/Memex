@@ -1,0 +1,8 @@
+node_modules/
+dist/
+web/dist/
+*.log
+.DS_Store
+
+# rebuildable search index — never commit this
+.memex/
