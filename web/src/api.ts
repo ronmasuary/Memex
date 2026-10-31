@@ -21,5 +21,20 @@ async function getJson<T>(url: string): Promise<T> {
   return body as T;
 }
 
-export const fetchNotes = () => getJson<{ notes: NoteSummary[] }>("/api/notes");
+export interface GraphNode {
+  id: string;
+  title: string;
+  project: string;
+  tags: string[];
+  status: "active" | "conflict";
+  backlinks: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export const fetchGraph = () => getJson<GraphData>("/api/graph");
+export const fetchNotes =() => getJson<{ notes: NoteSummary[] }>("/api/notes");
 export const fetchNote = (id: string) => getJson<NoteDetail>(`/api/note/${encodeURIComponent(id)}`);

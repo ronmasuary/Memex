@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { fetchNote, fetchNotes, type NoteDetail, type NoteSummary } from "./api";
+import { fetchGraph, fetchNote, fetchNotes, type NoteDetail, type NoteSummary } from "./api";
+import { Graph } from "./Graph";
 
-/** Tiny history-API router: two screens, no library. */
+/** Tiny history-API router: three screens (list, graph, note), no library. */
 function usePath(): [string, (to: string) => void] {
   const [path, setPath] = useState(window.location.pathname);
   useEffect(() => {
@@ -54,16 +55,44 @@ export function App() {
     },
   });
 
+  const isGraph = path === "/graph";
+  const tab = (to: string, label: string, active: boolean) => (
+    <a
+      {...link(to)}
+      aria-current={active ? "page" : undefined}
+      className={active ? "font-medium underline underline-offset-4" : muted}
+    >
+      {label}
+    </a>
+  );
+
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
-      <header className="mb-6">
+    <div className={`mx-auto px-4 py-6 ${isGraph ? "max-w-5xl" : "max-w-3xl"}`}>
+      <header className="mb-6 flex items-baseline gap-6">
         <a {...link("/")} className="text-lg font-semibold tracking-tight">
           Memex
         </a>
+        <nav className="flex gap-4 text-sm" aria-label="Views">
+          {tab("/", "Notes", !isGraph && !noteId)}
+          {tab("/graph", "Graph", isGraph)}
+        </nav>
       </header>
-      {noteId ? <NoteView id={noteId} link={link} go={go} /> : <NoteList link={link} />}
+      {noteId ? (
+        <NoteView id={noteId} link={link} go={go} />
+      ) : isGraph ? (
+        <GraphView go={go} />
+      ) : (
+        <NoteList link={link} />
+      )}
     </div>
   );
+}
+
+function GraphView({ go }: { go: (to: string) => void }) {
+  const { data, error } = useAsync(fetchGraph, "graph");
+  if (error) return <p className="text-red-600">Could not load graph: {error}</p>;
+  if (!data) return <p className={muted}>Loading…</p>;
+  return <Graph data={data} onOpen={(id) => go(`/note/${encodeURIComponent(id)}`)} />;
 }
 
 function NoteList({ link }: { link: LinkProps }) {
