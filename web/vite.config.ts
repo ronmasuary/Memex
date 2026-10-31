@@ -20,6 +20,10 @@ function memexApi(): Plugin {
       const { createHandler } = await import("../src/serve.ts");
       const { Vault } = await import("../src/vault.ts");
       const root = path.resolve(process.env.MEMEX_VAULT ?? "../memex-vault");
+      // Note: running `vite dev --host` binds the dev server to the LAN, which exposes this
+      // read API (unauthenticated) to the local network. Writes stay safe — the resolve route
+      // enforces a loopback peer check regardless of bind address — but keep a private vault on
+      // the default localhost bind. `memex serve` (production) listens on 127.0.0.1 only.
       server.middlewares.use(createHandler({ vault: new Vault(root) }));
       server.config.logger.info(`  memex API reading vault: ${root}`);
     },

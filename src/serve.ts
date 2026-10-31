@@ -250,6 +250,9 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     } catch (err) {
       return sendJson(res, 400, { error: (err as Error).message });
     }
+    if (typeof body !== "object" || body === null) {
+      return sendJson(res, 400, { error: "body must be a JSON object" });
+    }
     const { a, b, action, note } = body;
     if (typeof a !== "string" || typeof b !== "string" || !ID_PATTERN.test(a) || !ID_PATTERN.test(b)) {
       return sendJson(res, 400, { error: "a and b must be note ids" });
