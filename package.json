@@ -22,11 +22,14 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "gray-matter": "^4.0.3",
     "minisearch": "^7.2.0",
-    "simple-git": "^4.0.2"
+    "simple-git": "^4.0.2",
+    "zod": "^4.6.7"
   },
   "bin": {
-    "memex": "dist/cli.js"
+    "memex": "dist/cli.js",
+    "memex-mcp": "dist/mcp.js"
   }
 }
