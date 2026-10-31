@@ -86,6 +86,21 @@ export const CASES: ConflictCase[] = [
     expect: "silent",
   },
 
+  // (e) same key + different value but DIFFERENT project -> MUST NOT flag (conflicts are per-project)
+  {
+    name: "e1: same key and differing value across two projects",
+    existing: [{ id: "memex-storage", key: "storage-choice", project: "memex", status: "active", updated: OLD, body: "We store notes in SQLite." }],
+    candidate: { id: "wikey-storage", key: "storage-choice", project: "wikey", updated: NEW, body: "We store notes in Postgres." },
+    expect: "silent",
+  },
+  {
+    name: "e2: same key and differing value within one project still flags",
+    existing: [{ id: "memex-storage", key: "storage-choice", project: "memex", status: "active", updated: OLD, body: "We store notes in SQLite." }],
+    candidate: { id: "memex-storage-2", key: "storage-choice", project: "memex", updated: NEW, body: "We store notes in Postgres." },
+    expect: "flag",
+    flags: "memex-storage",
+  },
+
   // (d) similar wording, different key, unrelated -> MUST NOT flag
   {
     name: "d1: near-identical wording under a different key",

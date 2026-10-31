@@ -29,7 +29,7 @@ const text = (t: string): ToolResult => ({ content: [{ type: "text", text: t }] 
 const fail = (t: string): ToolResult => ({ content: [{ type: "text", text: t }], isError: true });
 
 function toConflictNote(n: Note): ConflictNote {
-  return { id: n.id, title: n.title, key: n.key, status: n.status, body: n.body, updated: n.updated };
+  return { id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated };
 }
 
 function clamp(value: number | undefined, fallback: number, max: number): number {

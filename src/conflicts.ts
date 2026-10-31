@@ -5,7 +5,7 @@ import { slugify } from "./slug.js";
  * ("your memory cries wolf") is the failure mode that kills the tool, a miss is merely a miss.
  *
  * A candidate conflicts with an existing note only when ALL of these hold:
- *   1. both carry the same non-empty `key`;
+ *   1. both carry the same non-empty `key` AND belong to the same `project`;
  *   2. the existing note is active and is not the candidate itself;
  *   3. the candidate does not supersede it (explicit `supersedes:` or the existing note is newer);
  *   4. the bodies differ after normalization;
@@ -21,6 +21,8 @@ export interface ConflictNote {
   id: string;
   title?: string;
   key?: string;
+  /** Project namespace. Conflicts are scoped per project, so the same key in two projects never cross-flags. */
+  project?: string;
   status?: string;
   body: string;
   /** ISO timestamp. */
@@ -58,6 +60,10 @@ export function extractSupersedes(body: string): string[] {
 
 function normalizeKey(key: string | undefined): string {
   return key ? slugify(key) : "";
+}
+
+function normalizeProject(project: string | undefined): string {
+  return (project ?? "").trim().toLowerCase();
 }
 
 function normalizeBody(body: string): string {
@@ -142,6 +148,7 @@ function differingValues(existing: string, candidate: string): { existing: strin
 export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[]): ConflictWarning[] {
   const key = normalizeKey(candidate.key);
   if (!key) return [];
+  const project = normalizeProject(candidate.project);
   const superseded = new Set([...(candidate.supersedes ?? []), ...extractSupersedes(candidate.body)].map((s) => slugify(s)));
   const warnings: ConflictWarning[] = [];
 
@@ -149,6 +156,7 @@ export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[
     if (other.id === candidate.id) continue;
     if (other.status === "conflict") continue;
     if (normalizeKey(other.key) !== key) continue;
+    if (normalizeProject(other.project) !== project) continue; // conflicts are per-project; same key across projects is fine
     if (superseded.has(other.id)) continue;
     if (Date.parse(other.updated) > Date.parse(candidate.updated)) continue; // candidate is the older write
     if (normalizeBody(other.body) === normalizeBody(candidate.body)) continue;
