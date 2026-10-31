@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { fetchGraph, fetchNote, fetchNotes, type NoteDetail, type NoteSummary } from "./api";
+import { fetchConflicts, fetchGraph, fetchNote, fetchNotes, type NoteDetail, type NoteSummary } from "./api";
+import { ConflictsView } from "./Conflicts";
 import { Graph } from "./Graph";
 
-/** Tiny history-API router: three screens (list, graph, note), no library. */
+/** Tiny history-API router: four screens (list, graph, conflicts, note), no library. */
 function usePath(): [string, (to: string) => void] {
   const [path, setPath] = useState(window.location.pathname);
   useEffect(() => {
@@ -56,31 +57,42 @@ export function App() {
   });
 
   const isGraph = path === "/graph";
-  const tab = (to: string, label: string, active: boolean) => (
+  const isConflicts = path === "/conflicts";
+  const [conflictCount, setConflictCount] = useState<number>();
+  useEffect(() => {
+    fetchConflicts().then((d) => setConflictCount(d.conflicts.length), () => undefined);
+  }, []);
+  const tab = (to: string, label: string, active: boolean, badge?: number) => (
     <a
       {...link(to)}
       aria-current={active ? "page" : undefined}
       className={active ? "font-medium underline underline-offset-4" : muted}
     >
       {label}
+      {badge ? (
+        <span className="ml-1.5 rounded-full bg-amber-200 px-1.5 text-xs font-normal text-amber-900">{badge}</span>
+      ) : null}
     </a>
   );
 
   return (
-    <div className={`mx-auto px-4 py-6 ${isGraph ? "max-w-5xl" : "max-w-3xl"}`}>
+    <div className={`mx-auto px-4 py-6 ${isGraph || isConflicts ? "max-w-5xl" : "max-w-3xl"}`}>
       <header className="mb-6 flex items-baseline gap-6">
         <a {...link("/")} className="text-lg font-semibold tracking-tight">
           Memex
         </a>
         <nav className="flex gap-4 text-sm" aria-label="Views">
-          {tab("/", "Notes", !isGraph && !noteId)}
+          {tab("/", "Notes", !isGraph && !isConflicts && !noteId)}
           {tab("/graph", "Graph", isGraph)}
+          {tab("/conflicts", "Conflicts", isConflicts, conflictCount)}
         </nav>
       </header>
       {noteId ? (
         <NoteView id={noteId} link={link} go={go} />
       ) : isGraph ? (
         <GraphView go={go} />
+      ) : isConflicts ? (
+        <ConflictsView link={link} onCount={setConflictCount} />
       ) : (
         <NoteList link={link} />
       )}
@@ -141,6 +153,9 @@ function NoteList({ link }: { link: LinkProps }) {
                     {n.title}
                     {n.status === "conflict" && (
                       <span className="ml-2 rounded bg-amber-200 px-1.5 text-xs text-amber-900">conflict</span>
+                    )}
+                    {n.status === "superseded" && (
+                      <span className="ml-2 rounded bg-zinc-200 px-1.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">superseded</span>
                     )}
                   </span>
                   <span className={`shrink-0 text-xs ${muted}`}>{n.updated.slice(0, 10)}</span>
@@ -210,7 +225,15 @@ function NoteView({ id, link, go }: { id: string; link: LinkProps; go: (to: stri
       </div>
       {note.status === "conflict" && (
         <p className="mb-4 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900">
-          This note is flagged as conflicting with another.
+          This note is flagged as conflicting with another.{" "}
+          <a {...link("/conflicts")} className="underline">
+            Open the Conflicts inbox
+          </a>
+        </p>
+      )}
+      {note.status === "superseded" && (
+        <p className="mb-4 rounded bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          Superseded: a conflict was resolved in favour of another note. Kept for history.
         </p>
       )}
       <div className="md" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: data.html }} />
