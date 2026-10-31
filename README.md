@@ -72,3 +72,11 @@ Early days — issues and ideas welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 [MIT](LICENSE) © Ron Masuary
+
+---
+
+## MCP server
+
+`dist/mcp.js` is a stdio MCP server exposing six tools (`remember`, `recall`, `read_note`, `get_backlinks`, `list_notes`, `list_tags`). Agent instructions and verbatim Claude Desktop config for macOS and Windows are in [MEMEX.md](MEMEX.md).
+
+`remember` runs deterministic contradiction detection: a write whose `key` matches an active note that asserts a *different value* returns a warning to the agent. It is tuned to under-flag; the [correctness suite](src/conflicts.fixtures.ts) is mostly cases that assert nothing flags. It is the seed of an evals story, not one yet.
