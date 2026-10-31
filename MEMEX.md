@@ -60,3 +60,19 @@ Create a vault first (`node dist/cli.js init <dir>`), build (`npm run build`), t
 Find your node path with `which node` (macOS) or `where node` (Windows). Keep the vault out of Dropbox/iCloud/OneDrive.
 
 The server speaks MCP over stdio, so it logs only to stderr; never add `console.log` to `src/`.
+
+## Wiring up Cursor
+
+Add the same server to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per project), again with absolute paths. On Windows use the `C:\...` forms from above.
+
+```json
+{
+  "mcpServers": {
+    "memex": {
+      "command": "/usr/local/bin/node",
+      "args": ["/Users/you/projects/Memex/dist/mcp.js"],
+      "env": { "MEMEX_VAULT": "/Users/you/memex-vault" }
+    }
+  }
+}
+```
