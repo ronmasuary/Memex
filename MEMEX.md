@@ -9,7 +9,7 @@ You have a persistent, git-backed memory via the `memex` MCP server.
 - Call `remember` when you learn something durable: a decision and its reason, a user preference, a constraint, a gotcha. Not for chat chatter or anything derivable from the code.
 - Always pass `project` and a `why` (one line: why this is worth keeping).
 - For a fact that should have ONE current value (a choice, a version, a setting), pass a stable `key`, e.g. `storage-choice`.
-- If `remember` returns a WARNING that it may contradict another note, do not ignore it: read that note with `read_note`, then either reconcile, or if your note replaces the old one, re-save it with a line `Supersedes: [[old-id]]` in the body.
+- If `remember` returns a WARNING that it may contradict another note, do not ignore it: read that note with `read_note`, then either reconcile, or if your note replaces the old one, re-save it with a line `Supersedes: [[old-id]]` in the body. Use `resolve_conflict` only after the user has said which side is right.
 - Link related notes with `[[note-id]]`. Use `get_backlinks`, `list_notes`, `list_tags` to browse.
 - `recall` returns short snippets; use `read_note` for the full text.
 ```
@@ -24,6 +24,7 @@ You have a persistent, git-backed memory via the `memex` MCP server.
 | `get_backlinks(id)` | Notes linking here |
 | `list_notes(project?, tag?, limit?)` | Browse (default 50, max 100) |
 | `list_tags(project?)` | Tags with counts |
+| `resolve_conflict(a, b, action, note?, why?)` | `keep_a`, `keep_b` or `keep_both` (needs `note`); one commit |
 
 ## Wiring up Claude Desktop
 
