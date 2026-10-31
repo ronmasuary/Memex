@@ -8,7 +8,7 @@
 
 Agents forget everything between sessions. Memex gives them a memory that **persists, links, and stays accountable**: a git-backed markdown knowledge base that any MCP host (Claude Desktop, Cursor, your own agent) can read and write. Your notes are plain `.md` files you own, not rows in someone's database.
 
-> **Status:** v0.2, usable. Six MCP tools, contradiction warnings, a browse UI and a force-directed graph. See the [roadmap](#roadmap).
+> **Status:** pre-release, in active development. v0.1 (Brain) and v0.2 (Graph) are feature-complete — six MCP tools, contradiction warnings, a browse UI and a force-directed graph — but not yet tagged or released. See the [roadmap](#roadmap).
 
 ## Accountable memory that doesn't rot
 
@@ -60,9 +60,9 @@ Use **absolute paths** to `node` and `dist/mcp.js`; `npx` is often not resolvabl
 {
   "mcpServers": {
     "memex": {
-      "command": "C:\Program Files\nodejs\node.exe",
-      "args": ["C:\Users\you\projects\Memex\dist\mcp.js"],
-      "env": { "MEMEX_VAULT": "C:\Users\you\memex-vault" }
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["C:\\Users\\you\\projects\\Memex\\dist\\mcp.js"],
+      "env": { "MEMEX_VAULT": "C:\\Users\\you\\memex-vault" }
     }
   }
 }
@@ -110,8 +110,8 @@ Every tool caps its output so a memory lookup never floods the host's context.
 
 ## Roadmap
 
-- [x] **v0.1 — Brain.** Markdown store, MCP read/write/search, contradiction warnings.
-- [x] **v0.2 — Graph.** Wikilinks, backlinks, browse UI and the force-directed graph.
+- [ ] **v0.1 — Brain.** Markdown store, MCP read/write/search, contradiction warnings. *(built, not yet tagged)*
+- [ ] **v0.2 — Graph.** Wikilinks, backlinks, browse UI and the force-directed graph. *(built, not yet tagged)*
 - [ ] **v0.3 — Conflicts.** The contradiction inbox and resolve actions.
 - [ ] **v0.4 — Time-travel.** Scrub the brain's history; diff any two points.
 - [ ] **v0.5 — Recall.** Embeddings and hybrid semantic search on Postgres + pgvector (Docker lands here).
