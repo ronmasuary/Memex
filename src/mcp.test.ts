@@ -32,10 +32,10 @@ afterEach(async () => {
 });
 
 describe("memex MCP server (in-memory transport)", () => {
-  it("exposes exactly the six tools", async () => {
+  it("exposes exactly the seven tools", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["get_backlinks", "list_notes", "list_tags", "read_note", "recall", "remember"],
+      ["get_backlinks", "list_notes", "list_tags", "read_note", "recall", "remember", "resolve_conflict"],
     );
   });
 

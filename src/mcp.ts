@@ -41,7 +41,7 @@ function newSessionId(): string {
   return `${new Date().toISOString().slice(0, 10)}-${randomBytes(3).toString("hex")}`;
 }
 
-/** Build the Memex MCP server (exactly six tools) over `vault`. Transport-agnostic so tests can use in-memory. */
+/** Build the Memex MCP server (seven tools) over `vault`. Transport-agnostic so tests can use in-memory. */
 export function createServer(vault: Vault): McpServer {
   const server = new McpServer({ name: "memex", version: "0.1.0" });
   const index = new SearchIndex(vault);
@@ -78,7 +78,10 @@ export function createServer(vault: Vault): McpServer {
         const warnings = detectConflicts(toConflictNote(result.note), others);
         const lines = [`${result.created ? "Saved" : "Updated"} note ${result.note.id} (${result.note.path}).`];
         if (result.commit) lines.push(`Commit: ${result.commit.slice(0, 7)}`);
-        for (const w of warnings) lines.push("", `WARNING: ${w.message}`);
+        for (const w of warnings) {
+          lines.push("", `WARNING: ${w.message}`);
+          lines.push(`Once the user decides, settle it with resolve_conflict (a: "${w.id}", b: "${result.note.id}").`);
+        }
         return text(lines.join("\n"));
       } catch (err) {
         return fail(`remember failed: ${(err as Error).message}`);
@@ -218,6 +221,41 @@ export function createServer(vault: Vault): McpServer {
         return text(lines.join("\n"));
       } catch (err) {
         return fail(`list_tags failed: ${(err as Error).message}`);
+      }
+    },
+  );
+
+  server.registerTool(
+    "resolve_conflict",
+    {
+      description:
+        "Resolve a contradiction between two notes (ids from a `remember` WARNING, or the Conflicts page). " +
+        "Only do this when the user has told you which side is right; if unsure, ask them. " +
+        "`a` is the older note, `b` the newer. Actions: keep_a (b is marked superseded), keep_b (a is marked superseded), " +
+        "or keep_both (requires `note`, a reconciliation explaining how both hold; both stay active). " +
+        "Each resolution is exactly one git commit. Nothing is deleted.",
+      inputSchema: {
+        a: z.string().min(1).describe("Id of the first (older) note."),
+        b: z.string().min(1).describe("Id of the second (newer) note."),
+        action: z.enum(["keep_a", "keep_b", "keep_both"]),
+        note: z.string().optional().describe("Reconciliation text; required for keep_both."),
+        why: z.string().optional().describe("Why this resolution (recorded as provenance)."),
+      },
+    },
+    async ({ a, b, action, note, why }) => {
+      try {
+        const client = server.server.getClientVersion()?.name;
+        const source = client ? `mcp/${slugify(client) || "client"}` : "mcp/agent";
+        const r = await vault.resolveConflict(slugify(a), slugify(b), action, { source, session, why }, note);
+        const lines = [
+          action === "keep_both"
+            ? `Kept both ${slugify(a)} and ${slugify(b)}; reconciliation note ${r.reconciliation}.`
+            : `Kept ${r.kept}; ${r.superseded} is now superseded (history preserved).`,
+        ];
+        if (r.commit) lines.push(`Commit: ${r.commit.slice(0, 7)}`);
+        return text(lines.join("\n"));
+      } catch (err) {
+        return fail(`resolve_conflict failed: ${(err as Error).message}`);
       }
     },
   );

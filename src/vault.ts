@@ -4,11 +4,13 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gitFor, Queue } from "./git.js";
+import { findConflictPairs, type ConflictNote } from "./conflicts.js";
 import { assertSafeFilename, makeSlug, slugify, uniqueSlug } from "./slug.js";
 
 export const DEFAULT_PROJECT = "general";
 
-export type NoteStatus = "active" | "conflict";
+/** `conflict`: flagged as contradicting another note. `superseded`: lost a resolution; kept for history, ignored by detection. */
+export type NoteStatus = "active" | "conflict" | "superseded";
 
 /** Who wrote a note and why. Recorded in frontmatter and in the git commit. */
 export interface Provenance {
@@ -43,6 +45,21 @@ export interface NoteInput {
   tags?: string[];
   key?: string;
   status?: NoteStatus;
+}
+
+export type ResolveAction = "keep_a" | "keep_b" | "keep_both";
+
+export interface ResolveResult {
+  action: ResolveAction;
+  /** The note that was kept (keep_a / keep_b) or null for keep_both. */
+  kept: string | null;
+  /** The note that lost (keep_a / keep_b) or null for keep_both. */
+  superseded: string | null;
+  /** Id of the reconciliation note created by keep_both. */
+  reconciliation: string | null;
+  /** Paths touched by the single resolution commit. */
+  files: string[];
+  commit: string | null;
 }
 
 export interface WriteResult {
@@ -110,7 +127,7 @@ export function parseNote(relPath: string, rawText: string): Note {
     project: optionalString(data.project) ?? path.posix.dirname(relPath),
     tags,
     key: optionalString(data.key),
-    status: data.status === "conflict" ? "conflict" : "active",
+    status: data.status === "conflict" || data.status === "superseded" ? data.status : "active",
     source: optionalString(data.source),
     session: optionalString(data.session),
     why: optionalString(data.why),
@@ -243,6 +260,92 @@ export class Vault {
     }
     return { note: saved, created: !previous, commit: sha };
   }
+
+  /**
+   * Resolve one detected contradiction between notes `aId` and `bId` as exactly ONE git commit.
+   *
+   * - keep_a / keep_b: the kept note returns to `active` and gains `Supersedes: [[loser]]`; the loser becomes
+   *   `status: superseded` (kept for history, never deleted) and gains `Superseded by: [[kept]]`.
+   * - keep_both: both return to `active`, each gains `Reconciled with: [[other]]` (which silences the detector for
+   *   the pair), and a new reconciliation note linking both is created from `note` (required).
+   *
+   * Refuses when the two notes are not currently in conflict, so a stale click or a retried tool call can't rewrite history.
+   */
+  resolveConflict(aId: string, bId: string, action: ResolveAction, prov: Provenance, note?: string): Promise<ResolveResult> {
+    return this.writes.run(() => this.doResolve(aId, bId, action, prov, note));
+  }
+
+  private async doResolve(aId: string, bId: string, action: ResolveAction, prov: Provenance, note?: string): Promise<ResolveResult> {
+    if (aId === bId) throw new Error("a and b must be two different notes");
+    const all = await Promise.all((await this.listNotePaths()).map((p) => this.readNote(p)));
+    const a = all.find((n) => n.id === aId);
+    const b = all.find((n) => n.id === bId);
+    if (!a) throw new Error(`no note with id "${aId}"`);
+    if (!b) throw new Error(`no note with id "${bId}"`);
+    const toConflictNote = (n: Note): ConflictNote => ({ id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated });
+    const inConflict = findConflictPairs(all.map(toConflictNote)).some(
+      (p) => (p.a.id === aId && p.b.id === bId) || (p.a.id === bId && p.b.id === aId),
+    );
+    if (!inConflict) throw new Error(`"${aId}" and "${bId}" are not in conflict (already resolved, or never contradicted)`);
+    if (action === "keep_both" && !note?.trim()) throw new Error("keep_both needs a reconciliation note explaining how the two fit together");
+
+    const now = new Date().toISOString();
+    const touched: Omit<Note, "path" | "hash">[] = [];
+    const stamp = (n: Note, changes: Partial<Note>): void => {
+      touched.push({ ...n, ...changes, source: prov.source, session: prov.session, why: prov.why ?? n.why, updated: now });
+    };
+    let kept: Note | undefined;
+    let lost: Note | undefined;
+    let reconciliation: string | null = null;
+
+    if (action === "keep_both") {
+      stamp(a, { status: "active", body: withLine(a.body, `Reconciled with: [[${b.id}]]`) });
+      stamp(b, { status: "active", body: withLine(b.body, `Reconciled with: [[${a.id}]]`) });
+      const title = `Reconciliation: ${a.key ?? `${a.id} and ${b.id}`}`;
+      const slug = makeSlug(title);
+      const taken = new Set(all.map((n) => n.id));
+      const id = uniqueSlug(slug, (candidate) => taken.has(candidate));
+      reconciliation = id;
+      touched.push({
+        id, title, project: a.project, tags: ["reconciliation"], status: "active",
+        source: prov.source, session: prov.session, why: prov.why, created: now, updated: now,
+        body: `Reconciles [[${a.id}]] and [[${b.id}]].
+
+${note!.trim()}`,
+      });
+    } else {
+      kept = action === "keep_a" ? a : b;
+      lost = action === "keep_a" ? b : a;
+      stamp(kept, { status: "active", body: withLine(kept.body, `Supersedes: [[${lost.id}]]`) });
+      stamp(lost, { status: "superseded", body: withLine(lost.body, `Superseded by: [[${kept.id}]]`) });
+    }
+
+    const files: string[] = [];
+    for (const n of touched) {
+      const relPath = `${n.project}/${n.id}.md`;
+      await atomicWriteFile(this.abs(relPath), serializeNote(n));
+      files.push(relPath);
+    }
+    let sha: string | null = null;
+    if (existsSync(path.join(this.root, ".git"))) {
+      const lines = [
+        `memex: resolve conflict ${a.id} / ${b.id} (${action.replace("_", " ")})`,
+        "",
+        `notes: ${files.map((f) => path.posix.basename(f, ".md")).join(", ")}`,
+      ];
+      if (prov.why) lines.push(`why: ${prov.why}`);
+      lines.push(`source: ${prov.source}`);
+      if (prov.session) lines.push(`session: ${prov.session}`);
+      const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
+      sha = await gitFor(this.root).commit(files, lines.join("\n"), author);
+    }
+    return { action, kept: kept?.id ?? null, superseded: lost?.id ?? null, reconciliation, files, commit: sha };
+  }
+}
+
+/** Append `line` to a body unless it is already present as a line of its own (resolutions stay idempotent). */
+function withLine(body: string, line: string): string {
+  return body.split("\n").some((l) => l.trim() === line) ? body : `${body.trimEnd()}\n\n${line}`;
 }
 
 const SEED_BODY = `Memex stores one note per markdown file and records every write as a git commit.

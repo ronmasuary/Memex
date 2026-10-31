@@ -6,7 +6,7 @@ import { slugify } from "./slug.js";
  *
  * A candidate conflicts with an existing note only when ALL of these hold:
  *   1. both carry the same non-empty `key` AND belong to the same `project`;
- *   2. the existing note is active and is not the candidate itself;
+ *   2. the existing note is active (not `superseded`, not flagged `conflict`) and is not the candidate itself;
  *   3. the candidate does not supersede it (explicit `supersedes:` or the existing note is newer);
  *   4. the bodies differ after normalization;
  *   5. the bodies assert *different values* for the thing the key names. A "value" is a token that
@@ -44,18 +44,28 @@ export interface ConflictWarning {
 }
 
 const SUPERSEDES_LINE = /^[ \t>*-]*supersedes\s*:\s*(.+)$/gim;
+const RECONCILED_LINE = /^[ \t>*-]*reconciled[ -]with\s*:\s*(.+)$/gim;
 const WIKILINK_OR_SLUG = /\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]|([A-Za-z0-9][A-Za-z0-9_-]*)/g;
 
 /** Ids named on `Supersedes: [[a]], b` lines in a note body. */
 export function extractSupersedes(body: string): string[] {
+  return idsOnLines(body, SUPERSEDES_LINE);
+}
+
+function idsOnLines(body: string, lines: RegExp): string[] {
   const ids = new Set<string>();
-  for (const line of body.matchAll(SUPERSEDES_LINE)) {
+  for (const line of body.matchAll(lines)) {
     for (const m of (line[1] ?? "").matchAll(WIKILINK_OR_SLUG)) {
       const id = slugify(m[1] ?? m[2] ?? "");
       if (id) ids.add(id);
     }
   }
   return [...ids];
+}
+
+/** Ids named on `Reconciled with: [[a]]` lines: a resolved "keep both", which silences the pair for good. */
+export function extractReconciled(body: string): string[] {
+  return idsOnLines(body, RECONCILED_LINE);
 }
 
 function normalizeKey(key: string | undefined): string {
@@ -154,7 +164,7 @@ export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[
 
   for (const other of existing) {
     if (other.id === candidate.id) continue;
-    if (other.status === "conflict") continue;
+    if (other.status !== undefined && other.status !== "active") continue; // superseded or already flagged
     if (normalizeKey(other.key) !== key) continue;
     if (normalizeProject(other.project) !== project) continue; // conflicts are per-project; same key across projects is fine
     if (superseded.has(other.id)) continue;
@@ -162,6 +172,8 @@ export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[
     if (normalizeBody(other.body) === normalizeBody(candidate.body)) continue;
     // The other note may itself declare that it supersedes the candidate's lineage; honour it too.
     if ((other.supersedes ?? []).concat(extractSupersedes(other.body)).includes(candidate.id)) continue;
+    // "Keep both" resolutions leave a `Reconciled with:` line on either side.
+    if (extractReconciled(other.body).includes(candidate.id) || extractReconciled(candidate.body).includes(other.id)) continue;
 
     const diff = differingValues(other.body, candidate.body);
     if (!diff) continue;
@@ -178,4 +190,39 @@ export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[
     });
   }
   return warnings;
+}
+
+export interface ConflictPair {
+  /** The older note (by `updated`, ties broken by id). */
+  a: ConflictNote;
+  /** The newer note, the one whose write collided with `a`. */
+  b: ConflictNote;
+  key: string;
+  /** Value tokens only `a` asserts. */
+  aValues: string[];
+  /** Value tokens only `b` asserts. */
+  bValues: string[];
+}
+
+/**
+ * Every unresolved contradiction in a set of notes: the same detector `remember` uses, run over all pairs.
+ * Notes flagged `status: conflict` take part (they are unresolved by definition); `superseded` notes never do.
+ * Each pair is reported once, older note first.
+ */
+export function findConflictPairs(notes: ConflictNote[]): ConflictPair[] {
+  const live = notes.map((n) => (n.status === "conflict" ? { ...n, status: "active" } : n));
+  const pairs = new Map<string, ConflictPair>();
+  for (const candidate of live) {
+    if (candidate.status !== undefined && candidate.status !== "active") continue;
+    for (const w of detectConflicts(candidate, live)) {
+      const other = live.find((n) => n.id === w.id);
+      if (!other) continue;
+      const [a, b, aValues, bValues] =
+        Date.parse(other.updated) < Date.parse(candidate.updated) || (other.updated === candidate.updated && other.id < candidate.id)
+          ? [other, candidate, w.existingValues, w.candidateValues]
+          : [candidate, other, w.candidateValues, w.existingValues];
+      pairs.set(`${a.id}~${b.id}`, { a, b, key: w.key, aValues, bValues });
+    }
+  }
+  return [...pairs.values()].sort((x, y) => y.b.updated.localeCompare(x.b.updated) || x.a.id.localeCompare(y.a.id));
 }
