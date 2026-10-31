@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { DEFAULT_LIMIT, SearchIndex } from "./search.js";
+import { DEFAULT_PORT, DEFAULT_WEB_DIST, startServer } from "./serve.js";
 import { initVault, Vault } from "./vault.js";
 
 const USAGE = `memex <command>
@@ -11,6 +12,7 @@ const USAGE = `memex <command>
   init [dir] [--remote <url>]            create a vault (default dir: ./memex-vault)
   reindex [--vault <dir>]                rebuild the search index from markdown
   find <query> [--vault <dir>] [--project <p>] [--limit <n>]
+  serve [--vault <dir>] [--port <n>]     browse the vault in the browser (default port 4321)
 
 The vault is --vault, else $MEMEX_VAULT, else the current directory.`;
 
@@ -79,6 +81,20 @@ export async function run(argv: string[], io: Io = processIo): Promise<number> {
           io.out(`${hit.id}  [${hit.project}]  ${hit.title}  (${hit.score.toFixed(2)})`);
           io.out(`    ${hit.snippet}`);
         }
+        return 0;
+      }
+      case "serve": {
+        const { values } = parseArgs({
+          args: rest,
+          options: { vault: { type: "string" }, port: { type: "string" } },
+        });
+        const port = values.port ? Number(values.port) : DEFAULT_PORT;
+        if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("--port must be 0-65535");
+        const server = await startServer({ vault: resolveVault(values.vault), port, webDist: DEFAULT_WEB_DIST });
+        const addr = server.address();
+        const actual = typeof addr === "object" && addr ? addr.port : port;
+        io.out(`Memex UI + API on http://127.0.0.1:${actual}  (Ctrl+C to stop)`);
+        if (!existsSync(DEFAULT_WEB_DIST)) io.err("web/dist not found: only /api is served. Run `npm --prefix web run build`.");
         return 0;
       }
       case undefined:
