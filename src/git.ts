@@ -21,19 +21,27 @@ export interface CommitAuthor {
 export class GitQueue {
   private readonly queue = new Queue();
   private readonly git: SimpleGit;
+  private identityEnsured = false;
 
   constructor(readonly dir: string) {
     this.git = simpleGit({ baseDir: dir });
+  }
+
+  /** Guarantee a local committer identity exists, so commits never fail on a machine with no global git config. Memoized. */
+  private async ensureIdentity(): Promise<void> {
+    if (this.identityEnsured) return;
+    for (const [key, fallback] of [["user.name", "Memex"], ["user.email", "memex@localhost"]] as const) {
+      const current = (await this.git.raw(["config", "--get", key]).catch(() => "")).trim();
+      if (!current) await this.git.addConfig(key, fallback, false, "local");
+    }
+    this.identityEnsured = true;
   }
 
   /** `git init` (idempotent); ensures a committer identity exists locally if none is configured. */
   init(): Promise<void> {
     return this.queue.run(async () => {
       await this.git.init();
-      for (const [key, fallback] of [["user.name", "Memex"], ["user.email", "memex@localhost"]] as const) {
-        const current = (await this.git.raw(["config", "--get", key]).catch(() => "")).trim();
-        if (!current) await this.git.addConfig(key, fallback, false, "local");
-      }
+      await this.ensureIdentity();
     });
   }
 
@@ -49,6 +57,7 @@ export class GitQueue {
    */
   commit(files: string[], message: string, author?: CommitAuthor): Promise<string | null> {
     return this.queue.run(async () => {
+      await this.ensureIdentity();
       await this.git.add(files.map((f) => path.posix.normalize(f)));
       const staged = await this.git.raw(["diff", "--cached", "--name-only", "--", ...files]);
       if (staged.trim() === "") return null;

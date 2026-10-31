@@ -34,6 +34,7 @@ describe("search", () => {
     const index = new SearchIndex(vault);
     const hits = await index.search("storage");
     expect(hits[0]?.id).toBe("storage-decision");
+    expect(hits[0]?.path).toBe("memex/storage-decision.md");
     expect(hits.map((h) => h.id)).toContain("weekly-notes");
     expect(hits[0]?.snippet.length).toBeLessThanOrEqual(202);
     expect(hits[0]?.snippet).toContain("markdown");
@@ -55,7 +56,7 @@ describe("search", () => {
     expect(await index.sync()).toMatchObject({ removed: 1 });
 
     // A fresh instance loads the persisted file and finds nothing to re-parse.
-    expect(JSON.parse(await readFile(index.indexFile, "utf8")).version).toBe(1);
+    expect(JSON.parse(await readFile(index.indexFile, "utf8")).version).toBe(2);
     expect(await new SearchIndex(vault).sync()).toMatchObject({ parsed: 0 });
   });
 

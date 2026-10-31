@@ -4,7 +4,7 @@ import path from "node:path";
 import { buildBacklinks, extractWikilinks } from "./links.js";
 import { atomicWriteFile, type Note, type Vault } from "./vault.js";
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const EXCERPT_CHARS = 2000;
 const SNIPPET_CHARS = 200;
 export const DEFAULT_LIMIT = 8;
@@ -12,7 +12,7 @@ export const DEFAULT_LIMIT = 8;
 const OPTIONS = {
   idField: "path",
   fields: ["title", "tags", "key", "body"],
-  storeFields: ["id", "title", "project", "excerpt"],
+  storeFields: ["path", "id", "title", "project", "excerpt"],
 };
 
 interface Entry {
