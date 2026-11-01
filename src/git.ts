@@ -17,6 +17,9 @@ export interface CommitAuthor {
   email: string;
 }
 
+/** Used for the committer only when a repo has no identity configured, so commits never fail on a bare machine. */
+export const FALLBACK_IDENTITY: CommitAuthor = { name: "Memex", email: "memex@localhost" };
+
 /** All git operations for one repository, funnelled through a single promise chain (no `.git/index.lock` races). */
 export class GitQueue {
   private readonly queue = new Queue();
@@ -27,21 +30,43 @@ export class GitQueue {
     this.git = simpleGit({ baseDir: dir });
   }
 
-  /** Guarantee a local committer identity exists, so commits never fail on a machine with no global git config. Memoized. */
-  private async ensureIdentity(): Promise<void> {
+  /**
+   * Guarantee a local committer identity exists, so commits never fail on a machine with no global git config.
+   * With `identity`, pins exactly that name and email to this repo's local config, overriding whatever global
+   * identity the machine has, so the vault's own commits are authored by it and not by a stale global default.
+   * The fallback path is memoized; an explicit identity is always written.
+   */
+  private async ensureIdentity(identity?: CommitAuthor): Promise<void> {
+    if (identity) {
+      await this.git.addConfig("user.name", identity.name, false, "local");
+      await this.git.addConfig("user.email", identity.email, false, "local");
+      this.identityEnsured = true;
+      return;
+    }
     if (this.identityEnsured) return;
-    for (const [key, fallback] of [["user.name", "Memex"], ["user.email", "memex@localhost"]] as const) {
+    for (const [key, fallback] of [["user.name", FALLBACK_IDENTITY.name], ["user.email", FALLBACK_IDENTITY.email]] as const) {
       const current = (await this.git.raw(["config", "--get", key]).catch(() => "")).trim();
       if (!current) await this.git.addConfig(key, fallback, false, "local");
     }
     this.identityEnsured = true;
   }
 
-  /** `git init` (idempotent); ensures a committer identity exists locally if none is configured. */
-  init(): Promise<void> {
+  /** `git init` (idempotent); ensures a committer identity exists locally, pinning `identity` if given. */
+  init(identity?: CommitAuthor): Promise<void> {
     return this.queue.run(async () => {
       await this.git.init();
-      await this.ensureIdentity();
+      await this.ensureIdentity(identity);
+    });
+  }
+
+  /** The committer identity this repo's commits will use: the configured value, else the Memex fallback. */
+  getIdentity(): Promise<CommitAuthor> {
+    return this.queue.run(async () => {
+      const read = async (key: string) => (await this.git.raw(["config", "--get", key]).catch(() => "")).trim();
+      return {
+        name: (await read("user.name")) || FALLBACK_IDENTITY.name,
+        email: (await read("user.email")) || FALLBACK_IDENTITY.email,
+      };
     });
   }
 

@@ -42,6 +42,8 @@ node dist/cli.js serve --vault ~/memex-vault   # http://127.0.0.1:4321
 
 Keep the vault out of Dropbox, iCloud and OneDrive (cloud sync plus git corrupts `.git`). `memex find <query>` searches from the terminal.
 
+Each vault is its own git repo. `memex init` stamps a committer identity onto it (your git config by default, or `--name "Ada Lovelace" --email ada@example.com`) and prints it, so the initial commit is signed by a real author rather than inheriting a stale global default.
+
 ## Connect an MCP host
 
 Use **absolute paths** to `node` and `dist/mcp.js`; `npx` is often not resolvable from desktop apps. Find node with `which node` (macOS) or `where node` (Windows), then restart the host.

@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { gitFor, Queue } from "./git.js";
+import { gitFor, Queue, type CommitAuthor } from "./git.js";
 import { findConflictPairs, type ConflictNote } from "./conflicts.js";
 import { assertSafeFilename, makeSlug, slugify, uniqueSlug } from "./slug.js";
 
@@ -357,6 +357,8 @@ const SEED_BODY = `Memex stores one note per markdown file and records every wri
 
 export interface InitOptions {
   remote?: string;
+  /** Pin this committer identity to the new vault's local git config so it authors the initial commit. */
+  identity?: CommitAuthor;
 }
 
 /** Scaffold a vault: git repo, `.gitattributes`, `.gitignore`, `memex.json`, a seed note, one initial commit. */
@@ -367,7 +369,7 @@ export async function initVault(dir: string, opts: InitOptions = {}): Promise<Va
   }
   await mkdir(vault.root, { recursive: true });
   const git = gitFor(vault.root);
-  await git.init();
+  await git.init(opts.identity);
   await atomicWriteFile(path.join(vault.root, ".gitattributes"), "* text=auto eol=lf\n");
   await atomicWriteFile(path.join(vault.root, ".gitignore"), ".memex/\n");
   await atomicWriteFile(

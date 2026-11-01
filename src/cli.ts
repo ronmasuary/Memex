@@ -3,18 +3,22 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { gitFor, type CommitAuthor } from "./git.js";
 import { DEFAULT_LIMIT, SearchIndex } from "./search.js";
 import { DEFAULT_PORT, DEFAULT_WEB_DIST, startServer } from "./serve.js";
 import { initVault, Vault } from "./vault.js";
 
 const USAGE = `memex <command>
 
-  init [dir] [--remote <url>]            create a vault (default dir: ./memex-vault)
+  init [dir] [--remote <url>] [--name <n> --email <e> | --author "<n> <e>"]
+                                         create a vault (default dir: ./memex-vault)
   reindex [--vault <dir>]                rebuild the search index from markdown
   find <query> [--vault <dir>] [--project <p>] [--limit <n>]
   serve [--vault <dir>] [--port <n>]     browse the vault in the browser (default port 4321)
 
-The vault is --vault, else $MEMEX_VAULT, else the current directory.`;
+The vault is --vault, else $MEMEX_VAULT, else the current directory.
+init stamps the committer identity onto the new vault's git config; without a flag it
+takes your git config (or $GIT_AUTHOR_NAME / $GIT_AUTHOR_EMAIL), else a Memex default.`;
 
 export interface Io {
   out(text: string): void;
@@ -27,6 +31,25 @@ const processIo: Io = {
   out: (text) => void process.stdout.write(`${text}\n`),
   err: (text) => void process.stderr.write(`${text}\n`),
 };
+
+/**
+ * The identity `memex init` should pin, from explicit flags or git's GIT_AUTHOR_* env vars.
+ * `--author "Name <email>"` is one flag; `--name`/`--email` must be given together. Returns
+ * undefined when nothing is set, leaving the vault to inherit the ambient git identity.
+ */
+function resolveInitIdentity(values: { name?: string; email?: string; author?: string }): CommitAuthor | undefined {
+  if (values.author !== undefined) {
+    const match = /^\s*(.+?)\s*<([^<>]+)>\s*$/.exec(values.author);
+    if (!match?.[1] || !match[2]) throw new Error(`--author must look like "Your Name <you@example.com>"`);
+    return { name: match[1], email: match[2].trim() };
+  }
+  const pick = (flag: string | undefined, env: string | undefined) => (flag ?? env ?? "").trim() || undefined;
+  const name = pick(values.name, process.env.GIT_AUTHOR_NAME);
+  const email = pick(values.email, process.env.GIT_AUTHOR_EMAIL);
+  if (name && email) return { name, email };
+  if (name || email) throw new Error(`set both --name and --email (or use --author "Your Name <you@example.com>")`);
+  return undefined;
+}
 
 function resolveVault(flag: string | undefined): Vault {
   const root = path.resolve(flag ?? process.env.MEMEX_VAULT ?? process.cwd());
@@ -45,10 +68,23 @@ export async function run(argv: string[], io: Io = processIo): Promise<number> {
         const { values, positionals } = parseArgs({
           args: rest,
           allowPositionals: true,
-          options: { remote: { type: "string" } },
+          options: {
+            remote: { type: "string" },
+            name: { type: "string" },
+            email: { type: "string" },
+            author: { type: "string" },
+          },
         });
-        const vault = await initVault(positionals[0] ?? "memex-vault", { remote: values.remote });
+        const identity = resolveInitIdentity(values);
+        const vault = await initVault(positionals[0] ?? "memex-vault", { remote: values.remote, identity });
         io.out(`Initialized Memex vault at ${vault.root}`);
+        const who = await gitFor(vault.root).getIdentity();
+        io.out(`Commits in this vault are authored by ${who.name} <${who.email}>.`);
+        if (!identity) {
+          io.out(`  Change it for this vault with:`);
+          io.out(`    git -C "${vault.root}" config user.name "Your Name"`);
+          io.out(`    git -C "${vault.root}" config user.email you@example.com`);
+        }
         if (values.remote) io.out(`Remote "origin" -> ${values.remote} (nothing is pushed automatically)`);
         return 0;
       }

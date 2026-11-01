@@ -136,4 +136,13 @@ describe("git provenance (real repo)", () => {
     expect(gitIn(target, "remote", "get-url", "origin")).toBe("https://example.invalid/me/vault.git");
     await expect(initVault(target)).rejects.toThrow(/already/);
   });
+
+  it("pins a provided identity to the vault's git config and authors the initial commit with it", async () => {
+    const target = path.join(dir, "vault");
+    await initVault(target, { identity: { name: "Ada Lovelace", email: "ada@example.com" } });
+    expect(gitIn(target, "config", "user.name")).toBe("Ada Lovelace");
+    expect(gitIn(target, "config", "user.email")).toBe("ada@example.com");
+    expect(gitIn(target, "log", "-1", "--format=%an <%ae>")).toBe("Ada Lovelace <ada@example.com>");
+    expect(gitIn(target, "log", "-1", "--format=%cn <%ce>")).toBe("Ada Lovelace <ada@example.com>");
+  });
 });
