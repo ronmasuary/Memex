@@ -47,7 +47,8 @@ export interface NoteInput {
   body: string;
   project?: string;
   tags?: string[];
-  key?: string;
+  /** A string sets the key; `null` clears an existing key; `undefined` leaves it unchanged on update. */
+  key?: string | null;
   status?: NoteStatus;
 }
 
@@ -255,7 +256,8 @@ export class Vault {
       title,
       project,
       tags: input.tags ?? previous?.tags ?? [],
-      key: input.key ?? previous?.key,
+      // `null` explicitly clears the key; `undefined` keeps whatever the note had.
+      key: input.key === null ? undefined : (input.key ?? previous?.key),
       status: input.status ?? previous?.status ?? "active",
       source: prov.source,
       session: prov.session,

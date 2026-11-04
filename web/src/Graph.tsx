@@ -259,8 +259,8 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
     else sim.alpha(0.6).restart();
   }, [spacing]);
 
-  // Visual-only state: restyle and relayout without touching positions.
-  useEffect(() => { paintRef.current(); }, [hover, spotlight, selected, badge, labelMode, zoomPct]);
+  // Visual-only state: restyle and relayout without touching positions. (Zoom/pan already repaint synchronously.)
+  useEffect(() => { paintRef.current(); }, [hover, spotlight, selected, badge, labelMode]);
 
   // Keep the viewBox and label geometry correct as the stage resizes.
   useEffect(() => {

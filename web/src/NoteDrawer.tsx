@@ -27,6 +27,7 @@ export function NoteDrawer({
     if (!id) return; // keep the last note visible while the drawer slides closed
     let live = true;
     setError(undefined);
+    setDetail(undefined); // don't show the previous note under a newly opened one
     fetchNote(id).then(
       (d) => { if (live) setDetail(d); },
       (e: Error) => { if (live) setError(e.message); },

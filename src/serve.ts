@@ -295,7 +295,8 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     if (why !== undefined && typeof why !== "string") return sendJson(res, 400, { error: "why must be a string" });
     try {
       const result = await vault.writeNote(
-        { title, body: noteBody, project, tags, key: key ?? undefined },
+        // Pass an explicit `null` through so emptying the key field clears it; `undefined` leaves it unchanged.
+        { title, body: noteBody, project, tags, key: key === undefined ? undefined : (key as string | null) },
         { source: "web/ui", session: "web", why: why?.trim() || "saved from the web UI" },
       );
       const others = (await loadNotes()).filter((n) => n.id !== result.note.id).map(toConflictNote);
@@ -368,7 +369,7 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
       const url = new URL(req.url ?? "/", "http://localhost");
       const isApi = url.pathname === "/api" || url.pathname.startsWith("/api/");
       if (method === "POST") {
-        const writer = writeRoutes[url.pathname];
+        const writer = writeRoutes[url.pathname.replace(/\/+$/, "") || "/"];
         if (writer) {
           try {
             return await handleWrite(req, res, writer);

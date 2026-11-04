@@ -130,10 +130,15 @@ describe("POST /api/notes (create / update) and archive routes", () => {
     const secondJson = (await second.json()) as { warnings: { id: string }[] };
     expect(secondJson.warnings.map((w) => w.id)).toContain("store-a");
 
-    // Re-using a title updates in place (created: false).
+    // Re-using a title updates in place (created: false) and keeps the key when none is sent.
     const update = await post("/api/notes", { title: "Store A", body: "We use Redis Cluster.", project: "w1" });
     expect(((await update.json()) as { created: boolean }).created).toBe(false);
     expect((await get("/api/note/store-a")).json.note.body).toContain("Redis Cluster");
+    expect((await get("/api/note/store-a")).json.note.key).toBe("wkey");
+
+    // An explicit null clears the key on update (emptying the editor's Key field).
+    await post("/api/notes", { title: "Store A", body: "No key now.", project: "w1", key: null });
+    expect((await get("/api/note/store-a")).json.note.key).toBe(null);
   });
 
   it("archives (never deletes) and restores a note, with the Archived view and the graph honouring it", async () => {

@@ -113,7 +113,8 @@ export function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor.open, noteId]);
 
   const conflictCount = conflicts?.conflicts.length ?? 0;
   const tabBtn = (t: Tab, label: string, icon: Parameters<typeof Icon>[0]["name"], badge?: number) => (

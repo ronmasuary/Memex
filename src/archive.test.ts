@@ -87,4 +87,14 @@ describe("archived notes are excluded from search", () => {
     await vault.unarchiveNote("redis-cache", prov);
     expect((await index.search("redis")).map((h) => h.id)).toContain("redis-cache");
   });
+
+  it("does not throw when a never-indexed archived note's file is deleted and swept", async () => {
+    await vault.writeNote({ title: "Born archived", body: "scratch", project: "memex", status: "archived" }, prov);
+    const index = new SearchIndex(vault);
+    await index.sync(); // archived from the start → never added to the MiniSearch index
+    await rm(vault.abs("memex/born-archived.md"));
+    const stats = await index.sync(); // the removed-file sweep must not discard a never-indexed doc
+    expect(stats.removed).toBe(1);
+    expect((await index.search("scratch")).map((h) => h.id)).not.toContain("born-archived");
+  });
 });
