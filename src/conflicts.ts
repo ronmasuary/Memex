@@ -164,7 +164,7 @@ export function detectConflicts(candidate: ConflictNote, existing: ConflictNote[
 
   for (const other of existing) {
     if (other.id === candidate.id) continue;
-    if (other.status !== undefined && other.status !== "active") continue; // superseded or already flagged
+    if (other.status !== undefined && other.status !== "active") continue; // superseded, archived or already flagged
     if (normalizeKey(other.key) !== key) continue;
     if (normalizeProject(other.project) !== project) continue; // conflicts are per-project; same key across projects is fine
     if (superseded.has(other.id)) continue;

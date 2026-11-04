@@ -9,8 +9,12 @@ import { assertSafeFilename, makeSlug, slugify, uniqueSlug } from "./slug.js";
 
 export const DEFAULT_PROJECT = "general";
 
-/** `conflict`: flagged as contradicting another note. `superseded`: lost a resolution; kept for history, ignored by detection. */
-export type NoteStatus = "active" | "conflict" | "superseded";
+/**
+ * `conflict`: flagged as contradicting another note. `superseded`: lost a resolution; kept for history, ignored
+ * by detection. `archived`: hidden from the default list, graph and search, and ignored by detection — but never
+ * deleted; the note stays on disk and in git history and can be restored to `active`.
+ */
+export type NoteStatus = "active" | "conflict" | "superseded" | "archived";
 
 /** Who wrote a note and why. Recorded in frontmatter and in the git commit. */
 export interface Provenance {
@@ -127,7 +131,10 @@ export function parseNote(relPath: string, rawText: string): Note {
     project: optionalString(data.project) ?? path.posix.dirname(relPath),
     tags,
     key: optionalString(data.key),
-    status: data.status === "conflict" || data.status === "superseded" ? data.status : "active",
+    status:
+      data.status === "conflict" || data.status === "superseded" || data.status === "archived"
+        ? data.status
+        : "active",
     source: optionalString(data.source),
     session: optionalString(data.session),
     why: optionalString(data.why),
@@ -152,6 +159,15 @@ export function serializeNote(note: Omit<Note, "path" | "hash">): string {
 
 export function commitMessage(id: string, created: boolean, prov: Provenance): string {
   const lines = [`memex: ${created ? "add" : "update"} ${id}`, "", `note: ${id}`];
+  if (prov.why) lines.push(`why: ${prov.why}`);
+  lines.push(`source: ${prov.source}`);
+  if (prov.session) lines.push(`session: ${prov.session}`);
+  return lines.join("\n");
+}
+
+/** Commit subject/body for a status flip (archive / restore) that keeps the note and its history intact. */
+function statusCommitMessage(verb: "archive" | "restore", id: string, prov: Provenance): string {
+  const lines = [`memex: ${verb} ${id}`, "", `note: ${id}`];
   if (prov.why) lines.push(`why: ${prov.why}`);
   lines.push(`source: ${prov.source}`);
   if (prov.session) lines.push(`session: ${prov.session}`);
@@ -259,6 +275,54 @@ export class Vault {
       sha = await gitFor(this.root).commit([relPath], commitMessage(id, !previous, prov), author);
     }
     return { note: saved, created: !previous, commit: sha };
+  }
+
+  /**
+   * Archive a note as exactly ONE git commit: its status becomes `archived`. Memex never hard-deletes — the
+   * file stays on disk and in git history, and the note can be restored with {@link unarchiveNote}. An archived
+   * note drops out of the default list, the graph, search and contradiction detection.
+   */
+  archiveNote(id: string, prov: Provenance): Promise<WriteResult> {
+    return this.writes.run(() => this.doSetArchived(id, true, prov));
+  }
+
+  /** Restore an archived note to `active` as exactly ONE git commit. */
+  unarchiveNote(id: string, prov: Provenance): Promise<WriteResult> {
+    return this.writes.run(() => this.doSetArchived(id, false, prov));
+  }
+
+  private async doSetArchived(id: string, archive: boolean, prov: Provenance): Promise<WriteResult> {
+    const relPath = (await this.listNotePaths()).find((p) => path.posix.basename(p, ".md") === id);
+    if (!relPath) throw new Error(`no note with id "${id}"`);
+    const current = await this.readNote(relPath);
+    if (archive && current.status === "archived") throw new Error(`"${id}" is already archived`);
+    if (!archive && current.status !== "archived") throw new Error(`"${id}" is not archived`);
+
+    const now = new Date().toISOString();
+    const note: Omit<Note, "path" | "hash"> = {
+      id: current.id,
+      title: current.title,
+      project: current.project,
+      tags: current.tags,
+      key: current.key,
+      status: archive ? "archived" : "active",
+      source: prov.source,
+      session: prov.session,
+      why: prov.why ?? current.why,
+      created: current.created,
+      updated: now,
+      body: current.body,
+    };
+    const text = serializeNote(note);
+    await atomicWriteFile(this.abs(relPath), text);
+
+    const saved: Note = { ...note, body: note.body.trim(), path: relPath, hash: hashText(text) };
+    let sha: string | null = null;
+    if (existsSync(path.join(this.root, ".git"))) {
+      const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
+      sha = await gitFor(this.root).commit([relPath], statusCommitMessage(archive ? "archive" : "restore", id, prov), author);
+    }
+    return { note: saved, created: false, commit: sha };
   }
 
   /**

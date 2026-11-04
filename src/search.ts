@@ -21,6 +21,8 @@ interface Entry {
   size: number;
   hash: string;
   links: string[];
+  /** Archived notes are tracked (so sync stays cheap) but kept out of the search index and backlinks. */
+  archived?: boolean;
 }
 
 export interface SearchHit {
@@ -130,25 +132,30 @@ export class SearchIndex {
         this.entries.set(rel, { ...entry, mtimeMs: info.mtimeMs, size: info.size });
         continue;
       }
-      if (entry) {
+      // Archived notes are excluded from search (and contribute no backlinks); if one was indexed, drop it.
+      const archived = note.status === "archived";
+      if (entry && !entry.archived) {
         this.mini.discard(rel);
         stats.updated++;
-      } else {
+      } else if (!entry) {
         stats.added++;
+      } else {
+        stats.updated++;
       }
-      this.mini.add(toDoc(note));
+      if (!archived) this.mini.add(toDoc(note));
       this.entries.set(rel, {
         id: note.id,
         mtimeMs: info.mtimeMs,
         size: info.size,
         hash: note.hash,
-        links: extractWikilinks(note.body),
+        links: archived ? [] : extractWikilinks(note.body),
+        archived,
       });
     }
 
-    for (const rel of [...this.entries.keys()]) {
+    for (const [rel, entry] of [...this.entries]) {
       if (present.has(rel)) continue;
-      this.mini.discard(rel);
+      if (!entry.archived) this.mini.discard(rel); // archived entries were never added to the index
       this.entries.delete(rel);
       stats.removed++;
     }
