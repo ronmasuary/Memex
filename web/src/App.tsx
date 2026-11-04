@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useState, type MouseEvent } from "react";
-import { fetchConflicts, fetchGraph, fetchNote, fetchNotes, type NoteDetail, type NoteSummary } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  archiveNote, fetchConflicts, fetchGraph, fetchNote, fetchNotes, unarchiveNote,
+  type ConflictsData, type GraphData, type NoteDetail, type NoteSummary,
+} from "./api";
+import { projectColors } from "./colors";
 import { ConflictsView } from "./Conflicts";
+import { Editor } from "./Editor";
 import { Graph } from "./Graph";
+import { Icon, IconSprite } from "./icons";
+import { NoteDrawer } from "./NoteDrawer";
 
-/** Tiny history-API router: four screens (list, graph, conflicts, note), no library. */
+type Tab = "notes" | "graph" | "conflicts";
+const TAB_PATH: Record<Tab, string> = { notes: "/", graph: "/graph", conflicts: "/conflicts" };
+
+/** Tiny history-API router: the three tabs plus /note/:id (which opens the drawer over the current tab). */
 function usePath(): [string, (to: string) => void] {
   const [path, setPath] = useState(window.location.pathname);
   useEffect(() => {
@@ -12,248 +22,246 @@ function usePath(): [string, (to: string) => void] {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const go = (to: string) => {
-    if (to === window.location.pathname) return;
+    if (to === window.location.pathname) return setPath(to);
     window.history.pushState(null, "", to);
     setPath(to);
-    window.scrollTo(0, 0);
   };
   return [path, go];
 }
-
-/** Resource state keyed by `key`, so a stale response never overwrites a newer one. */
-function useAsync<T>(load: () => Promise<T>, key: string) {
-  const [state, setState] = useState<{ key: string; data?: T; error?: string }>({ key: "" });
-  useEffect(() => {
-    let live = true;
-    load().then(
-      (data) => live && setState({ key, data }),
-      (e: Error) => live && setState({ key, error: e.message }),
-    );
-    return () => {
-      live = false;
-    };
-    // `load` is recreated every render; `key` identifies the request.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return state.key === key ? state : { key, data: undefined, error: undefined };
-}
-
-const muted = "text-zinc-500 dark:text-zinc-400";
-const panel = "rounded-lg border border-zinc-200 dark:border-zinc-800";
-
-type LinkProps = (to: string) => { href: string; onClick: (e: MouseEvent) => void };
 
 export function App() {
   const [path, go] = usePath();
   const noteId = path.startsWith("/note/") ? decodeURIComponent(path.slice("/note/".length)) : null;
 
-  const link: LinkProps = (to) => ({
-    href: to,
-    onClick: (e) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-      e.preventDefault();
-      go(to);
-    },
+  const lastTab = useRef<Tab>("notes");
+  let tab: Tab;
+  if (noteId) tab = lastTab.current;
+  else {
+    tab = path === "/graph" ? "graph" : path === "/conflicts" ? "conflicts" : "notes";
+    lastTab.current = tab;
+  }
+
+  // theme
+  const [theme, setTheme] = useState<string>(() => document.documentElement.getAttribute("data-theme") ?? "");
+  const toggleTheme = () => {
+    const cur = theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("memex-theme", next); } catch { /* private mode */ }
+    setTheme(next);
+  };
+
+  // data (refetched on `rev`); previous data is kept visible while a refresh is in flight.
+  const [rev, setRev] = useState(0);
+  const refresh = useCallback(() => setRev((r) => r + 1), []);
+  const [notes, setNotes] = useState<NoteSummary[]>();
+  const [graph, setGraph] = useState<GraphData>();
+  const [conflicts, setConflicts] = useState<ConflictsData>();
+  const [loadError, setLoadError] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    Promise.all([fetchNotes(), fetchGraph(), fetchConflicts()]).then(
+      ([n, g, c]) => { if (!live) return; setNotes(n.notes); setGraph(g); setConflicts(c); setLoadError(undefined); },
+      (e: Error) => { if (live) setLoadError(e.message); },
+    );
+    return () => { live = false; };
+  }, [rev]);
+
+  const projects = useMemo(() => (notes ?? []).map((n) => n.project), [notes]);
+  const color = useMemo(() => projectColors(projects), [projects]);
+
+  // toast
+  const [toast, setToast] = useState<{ msg: string; id: number }>();
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const say = useCallback((msg: string) => {
+    setToast({ msg, id: Date.now() });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(undefined), 2600);
+  }, []);
+
+  // editor
+  const [editor, setEditor] = useState<{ open: boolean; initial: NoteDetail | null }>({ open: false, initial: null });
+  const openNew = () => setEditor({ open: true, initial: null });
+  const openEditDetail = (detail: NoteDetail) => setEditor({ open: true, initial: detail });
+  const openEditId = async (id: string) => {
+    try { setEditor({ open: true, initial: await fetchNote(id) }); }
+    catch (e) { say((e as Error).message); }
+  };
+  const closeEditor = () => setEditor((s) => ({ ...s, open: false }));
+
+  const openNote = (id: string) => go(`/note/${encodeURIComponent(id)}`);
+  const closeNote = () => go(TAB_PATH[lastTab.current]);
+
+  const doArchive = async (id: string) => {
+    try { await archiveNote(id); say("Archived · still in git history"); if (noteId === id) closeNote(); refresh(); }
+    catch (e) { say((e as Error).message); }
+  };
+  const doRestore = async (id: string) => {
+    try { await unarchiveNote(id); say("Restored from archive"); refresh(); }
+    catch (e) { say((e as Error).message); }
+  };
+
+  // global search query (shared by the header field and the notes list)
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const onHeaderSearch = (v: string) => { setQuery(v); if (tab !== "notes") go("/"); };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === "Escape") { if (editor.open) closeEditor(); else if (noteId) closeNote(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   });
 
-  const isGraph = path === "/graph";
-  const isConflicts = path === "/conflicts";
-  const [conflictCount, setConflictCount] = useState<number>();
-  useEffect(() => {
-    fetchConflicts().then((d) => setConflictCount(d.conflicts.length), () => undefined);
-  }, []);
-  const tab = (to: string, label: string, active: boolean, badge?: number) => (
-    <a
-      {...link(to)}
-      aria-current={active ? "page" : undefined}
-      className={active ? "font-medium underline underline-offset-4" : muted}
-    >
-      {label}
-      {badge ? (
-        <span className="ml-1.5 rounded-full bg-amber-200 px-1.5 text-xs font-normal text-amber-900">{badge}</span>
-      ) : null}
-    </a>
+  const conflictCount = conflicts?.conflicts.length ?? 0;
+  const tabBtn = (t: Tab, label: string, icon: Parameters<typeof Icon>[0]["name"], badge?: number) => (
+    <button role="tab" aria-selected={tab === t} onClick={() => go(TAB_PATH[t])}>
+      <Icon name={icon} />{label}
+      {badge ? <span className="badge">{badge}</span> : null}
+    </button>
   );
-
-  return (
-    <div className={`mx-auto px-4 py-6 ${isGraph || isConflicts ? "max-w-5xl" : "max-w-3xl"}`}>
-      <header className="mb-6 flex items-baseline gap-6">
-        <a {...link("/")} className="text-lg font-semibold tracking-tight">
-          Memex
-        </a>
-        <nav className="flex gap-4 text-sm" aria-label="Views">
-          {tab("/", "Notes", !isGraph && !isConflicts && !noteId)}
-          {tab("/graph", "Graph", isGraph)}
-          {tab("/conflicts", "Conflicts", isConflicts, conflictCount)}
-        </nav>
-      </header>
-      {noteId ? (
-        <NoteView id={noteId} link={link} go={go} />
-      ) : isGraph ? (
-        <GraphView go={go} />
-      ) : isConflicts ? (
-        <ConflictsView link={link} onCount={setConflictCount} />
-      ) : (
-        <NoteList link={link} />
-      )}
-    </div>
-  );
-}
-
-function GraphView({ go }: { go: (to: string) => void }) {
-  const { data, error } = useAsync(fetchGraph, "graph");
-  if (error) return <p className="text-red-600">Could not load graph: {error}</p>;
-  if (!data) return <p className={muted}>Loading…</p>;
-  return <Graph data={data} onOpen={(id) => go(`/note/${encodeURIComponent(id)}`)} />;
-}
-
-function NoteList({ link }: { link: LinkProps }) {
-  const { data, error } = useAsync(fetchNotes, "notes");
-  const [filter, setFilter] = useState("");
-
-  const groups = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    const byProject = new Map<string, NoteSummary[]>();
-    for (const n of data?.notes ?? []) {
-      if (q && !`${n.title} ${n.id} ${n.project} ${n.tags.join(" ")}`.toLowerCase().includes(q)) continue;
-      byProject.set(n.project, [...(byProject.get(n.project) ?? []), n]);
-    }
-    return [...byProject].sort(([a], [b]) => a.localeCompare(b));
-  }, [data, filter]);
-
-  if (error) return <p className="text-red-600">Could not load notes: {error}</p>;
-  if (!data) return <p className={muted}>Loading…</p>;
 
   return (
     <>
-      <input
-        type="search"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter by title, project or tag"
-        aria-label="Filter notes"
-        className={`${panel} mb-6 w-full bg-transparent px-3 py-2`}
+      <IconSprite />
+      <header>
+        <div className="bar gutter view">
+          <button className="brand" onClick={() => go("/")}><span className="dot" />Memex</button>
+          <div className="tabs" role="tablist">
+            {tabBtn("graph", "Graph", "graph")}
+            {tabBtn("notes", "Notes", "list")}
+            {tabBtn("conflicts", "Conflicts", "alert", conflictCount || undefined)}
+          </div>
+          <div className="right">
+            <div className="search">
+              <Icon name="search" style={{ color: "var(--fg-faint)" }} />
+              <input ref={searchRef} value={query} onChange={(e) => onHeaderSearch(e.target.value)} placeholder="Search the vault" aria-label="Search the vault" />
+              <kbd>⌘K</kbd>
+            </div>
+            <button className="btn primary" onClick={openNew}><Icon name="plus" /><span className="lbl-txt">New note</span></button>
+            <button className="icon-btn" title="Toggle theme" aria-label="Toggle theme" onClick={toggleTheme}><Icon name="moon" /></button>
+          </div>
+        </div>
+      </header>
+
+      <main className="gutter">
+        {loadError && <div className="view"><p className="banner err">Could not load the vault: {loadError}</p></div>}
+
+        {tab === "graph" && (
+          <section className="view">
+            {graph ? <Graph data={graph} onOpen={openNote} /> : <p className="loading view">Loading…</p>}
+          </section>
+        )}
+
+        {tab === "notes" && (
+          <NotesView
+            notes={notes} color={color} query={query} setQuery={setQuery}
+            onOpen={openNote} onEdit={openEditId} onArchive={doArchive} onRestore={doRestore} onNew={openNew}
+          />
+        )}
+
+        {tab === "conflicts" && (
+          conflicts
+            ? <ConflictsView data={conflicts} color={color} onResolved={refresh} onOpenNote={openNote} />
+            : <p className="loading view">Loading…</p>
+        )}
+      </main>
+
+      <NoteDrawer
+        id={noteId} color={color} onClose={closeNote} onOpenNote={openNote}
+        onEdit={openEditDetail} onArchive={doArchive} onRestore={doRestore} onGoConflicts={() => { closeNote(); go("/conflicts"); }}
       />
-      {groups.length === 0 && (
-        <p className={muted}>{data.notes.length ? "No notes match." : "This vault has no notes yet."}</p>
-      )}
-      {groups.map(([project, notes]) => (
-        <section key={project} className="mb-6">
-          <h2 className={`mb-2 text-sm font-medium uppercase tracking-wide ${muted}`}>
-            {project} <span className="font-normal">({notes.length})</span>
-          </h2>
-          <ul className={`${panel} divide-y divide-zinc-200 dark:divide-zinc-800`}>
-            {notes.map((n) => (
-              <li key={n.id}>
-                <a
-                  {...link(`/note/${n.id}`)}
-                  className="flex items-baseline justify-between gap-4 px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-900"
-                >
-                  <span>
-                    {n.title}
-                    {n.status === "conflict" && (
-                      <span className="ml-2 rounded bg-amber-200 px-1.5 text-xs text-amber-900">conflict</span>
-                    )}
-                    {n.status === "superseded" && (
-                      <span className="ml-2 rounded bg-zinc-200 px-1.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">superseded</span>
-                    )}
-                  </span>
-                  <span className={`shrink-0 text-xs ${muted}`}>{n.updated.slice(0, 10)}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      <Editor
+        open={editor.open} initial={editor.initial} projects={[...new Set(projects)]}
+        onClose={closeEditor} onSaved={(msg) => { say(msg); refresh(); }}
+      />
+      {toast && <div className="toast" key={toast.id}><span className="dot" />{toast.msg}</div>}
     </>
   );
 }
 
-function NoteView({ id, link, go }: { id: string; link: LinkProps; go: (to: string) => void }) {
-  const { data, error } = useAsync<NoteDetail>(() => fetchNote(id), id);
+function NotesView({
+  notes, color, query, setQuery, onOpen, onEdit, onArchive, onRestore, onNew,
+}: {
+  notes: NoteSummary[] | undefined;
+  color: Map<string, string>;
+  query: string;
+  setQuery: (v: string) => void;
+  onOpen: (id: string) => void;
+  onEdit: (id: string) => void;
+  onArchive: (id: string) => void;
+  onRestore: (id: string) => void;
+  onNew: () => void;
+}) {
+  const [showArchived, setShowArchived] = useState(false);
 
-  // Rendered HTML carries plain <a class="wikilink" href="/note/x">; intercept to navigate without a reload.
-  const onBodyClick = (e: MouseEvent<HTMLElement>) => {
-    const a = (e.target as HTMLElement).closest("a");
-    if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-    if (a.classList.contains("missing")) return e.preventDefault();
-    if (a.classList.contains("wikilink")) {
-      e.preventDefault();
-      go(a.getAttribute("href") ?? "/");
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const byProject = new Map<string, NoteSummary[]>();
+    for (const n of notes ?? []) {
+      if (showArchived ? n.status !== "archived" : n.status === "archived") continue;
+      if (q && !`${n.title} ${n.id} ${n.project} ${n.tags.join(" ")}`.toLowerCase().includes(q)) continue;
+      byProject.set(n.project, [...(byProject.get(n.project) ?? []), n]);
     }
-  };
+    return [...byProject].sort(([a], [b]) => a.localeCompare(b));
+  }, [notes, query, showArchived]);
 
-  if (error) {
-    return (
-      <p className="text-red-600">
-        {error}.{" "}
-        <a {...link("/")} className="underline">
-          Back to notes
-        </a>
-      </p>
-    );
-  }
-  if (!data) return <p className={muted}>Loading…</p>;
+  const statusTag = (s: NoteSummary["status"]) =>
+    s === "conflict" ? <span className="statustag st-conflict">conflict</span>
+      : s === "superseded" ? <span className="statustag st-superseded">superseded</span>
+        : s === "archived" ? <span className="statustag st-archived">archived</span>
+          : null;
 
-  const { note, provenance, backlinks } = data;
   return (
-    <article>
-      <p className={`mb-1 text-sm ${muted}`}>
-        <a {...link("/")} className="underline">
-          Notes
-        </a>{" "}
-        / {note.project}
-      </p>
-      <h1 className="mb-3 text-2xl font-semibold">{note.title}</h1>
-      <div className={`${panel} mb-6 flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-sm`} aria-label="Provenance">
-        <span>
-          <span className={muted}>source</span> {provenance.source ?? "unknown"}
-        </span>
-        {provenance.session && (
-          <span>
-            <span className={muted}>session</span> {provenance.session}
-          </span>
-        )}
-        <span>
-          <span className={muted}>updated</span> {provenance.updated.slice(0, 10)}
-        </span>
-        {provenance.why && (
-          <span className="basis-full">
-            <span className={muted}>why</span> {provenance.why}
-          </span>
-        )}
+    <div className="view">
+      <div className="listhead">
+        <div className="bigsearch">
+          <Icon name="search" style={{ color: "var(--fg-faint)" }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter by title, id, project or tag" aria-label="Filter notes" />
+        </div>
+        <button className="toggle" aria-pressed={showArchived} onClick={() => setShowArchived((v) => !v)}>
+          <span className="switch" />Show archived
+        </button>
+        <button className="btn primary" onClick={onNew}><Icon name="plus" />New note</button>
       </div>
-      {note.status === "conflict" && (
-        <p className="mb-4 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900">
-          This note is flagged as conflicting with another.{" "}
-          <a {...link("/conflicts")} className="underline">
-            Open the Conflicts inbox
-          </a>
+
+      {!notes && <p className="loading">Loading…</p>}
+      {notes && groups.length === 0 && (
+        <p className="empty">
+          {showArchived
+            ? "No archived notes. Archiving keeps a note in git history; nothing is ever hard-deleted."
+            : notes.some((n) => n.status !== "archived") ? "No notes match." : "This vault has no notes yet."}
         </p>
       )}
-      {note.status === "superseded" && (
-        <p className="mb-4 rounded bg-zinc-100 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-          Superseded: a conflict was resolved in favour of another note. Kept for history.
-        </p>
-      )}
-      <div className="md" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: data.html }} />
-      <aside className="mt-10">
-        <h2 className={`mb-2 text-sm font-medium uppercase tracking-wide ${muted}`}>Backlinks ({backlinks.length})</h2>
-        {backlinks.length === 0 ? (
-          <p className={`text-sm ${muted}`}>No notes link here.</p>
-        ) : (
-          <ul className="list-disc pl-5">
-            {backlinks.map((b) => (
-              <li key={b.id}>
-                <a {...link(`/note/${b.id}`)} className="text-blue-600 underline dark:text-blue-400">
-                  {b.title}
-                </a>
-                <span className={`ml-2 text-xs ${muted}`}>{b.project}</span>
-              </li>
+
+      {groups.map(([project, list]) => (
+        <div className="proj-group" key={project}>
+          <h2>
+            <span className="sw" style={{ background: color.get(project) }} />
+            {project} <span className="ct">({list.length})</span>
+          </h2>
+          <div className="notelist">
+            {list.map((n) => (
+              <div className={`noteitem${n.status === "archived" ? " arch" : ""}`} key={n.id}>
+                <button className="ttl" onClick={() => onOpen(n.id)}>
+                  {n.title}
+                  {n.tags.length > 0 && <div className="sub">#{n.tags.join("  #")}</div>}
+                </button>
+                {statusTag(n.status)}
+                <span className="datecol">{n.updated.slice(0, 10)}</span>
+                <div className="rowact">
+                  <button title="Edit" aria-label={`Edit ${n.title}`} onClick={() => onEdit(n.id)}><Icon name="pencil" /></button>
+                  {n.status === "archived"
+                    ? <button title="Restore from archive" aria-label={`Restore ${n.title}`} onClick={() => onRestore(n.id)}><Icon name="restore" /></button>
+                    : <button title="Archive (kept in git history)" aria-label={`Archive ${n.title}`} onClick={() => onArchive(n.id)}><Icon name="archive" /></button>}
+                </div>
+              </div>
             ))}
-          </ul>
-        )}
-      </aside>
-    </article>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
