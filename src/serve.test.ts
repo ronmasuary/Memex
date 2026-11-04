@@ -65,7 +65,8 @@ describe("read API", () => {
     expect(inbox.flagged.map((c: { id: string }) => c.id)).toEqual(["clash"]);
     expect((await get("/api/note/nope")).status).toBe(404);
     expect((await get("/api/note/..%2f..%2fetc")).status).toBe(404);
-    expect((await fetch(`${base}/api/notes`, { method: "POST" })).status).toBe(405);
+    // A read-only route rejects POST with 405 (the write routes are handled before this branch).
+    expect((await fetch(`${base}/api/graph`, { method: "POST" })).status).toBe(405);
   });
 });
 
@@ -83,7 +84,7 @@ describe("POST /api/conflicts/resolve (the one write route)", () => {
     expect((await post({ a: "db-old", b: "db-new", action: "keep_both" })).status).toBe(409); // needs a note
     expect((await get("/api/conflicts")).json.conflicts).toHaveLength(1);
     expect((await fetch(`${base}/api/conflicts/resolve`)).status).toBe(404);
-    expect((await fetch(`${base}/api/notes`, { method: "POST" })).status).toBe(405);
+    expect((await fetch(`${base}/api/graph`, { method: "POST" })).status).toBe(405);
   });
 
   it("resolves a conflict and clears it from the inbox", async () => {
@@ -92,5 +93,66 @@ describe("POST /api/conflicts/resolve (the one write route)", () => {
     expect(((await res.json()) as { superseded: string }).superseded).toBe("db-old");
     expect((await get("/api/conflicts")).json.conflicts).toHaveLength(0);
     expect((await get("/api/note/db-old")).json.note.status).toBe("superseded");
+  });
+});
+
+describe("POST /api/notes (create / update) and archive routes", () => {
+  const post = (route: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}${route}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+  it("enforces the same write gate as resolve", async () => {
+    const good = { title: "Gate note", body: "x", project: "w1" };
+    expect((await fetch(`${base}/api/notes`, { method: "POST", headers: { "content-type": "text/plain" }, body: JSON.stringify(good) })).status).toBe(403);
+    expect((await post("/api/notes", good, { origin: "https://evil.example" })).status).toBe(403);
+    expect((await post("/api/notes/archive", { id: "x" }, { origin: "https://evil.example" })).status).toBe(403);
+  });
+
+  it("returns 400 on malformed or non-object bodies and bad fields", async () => {
+    expect((await fetch(`${base}/api/notes`, { method: "POST", headers: { "content-type": "application/json" }, body: "not json" })).status).toBe(400);
+    expect((await post("/api/notes", [1, 2, 3])).status).toBe(400); // array, not an object
+    expect((await post("/api/notes", { title: "   ", body: "x" })).status).toBe(400); // empty title
+    expect((await post("/api/notes", { title: "No body" })).status).toBe(400);
+    expect((await post("/api/notes", { title: "Bad tags", body: "x", tags: ["ok", 5] })).status).toBe(400);
+    expect((await post("/api/notes/archive", { id: "../etc" })).status).toBe(400); // not a valid id
+    expect((await post("/api/notes/archive", {})).status).toBe(400); // missing id
+  });
+
+  it("creates a note as one call and lists it; a colliding key surfaces a contradiction warning", async () => {
+    const first = await post("/api/notes", { title: "Store A", body: "We use Redis.", project: "w1", key: "wkey", why: "first" });
+    expect(first.status).toBe(200);
+    const firstJson = (await first.json()) as { created: boolean; note: { id: string }; warnings: unknown[] };
+    expect(firstJson.created).toBe(true);
+    expect(firstJson.note.id).toBe("store-a");
+    expect(firstJson.warnings).toHaveLength(0);
+    expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).toContain("store-a");
+
+    const second = await post("/api/notes", { title: "Store B", body: "We use Memcached.", project: "w1", key: "wkey", why: "second" });
+    const secondJson = (await second.json()) as { warnings: { id: string }[] };
+    expect(secondJson.warnings.map((w) => w.id)).toContain("store-a");
+
+    // Re-using a title updates in place (created: false).
+    const update = await post("/api/notes", { title: "Store A", body: "We use Redis Cluster.", project: "w1" });
+    expect(((await update.json()) as { created: boolean }).created).toBe(false);
+    expect((await get("/api/note/store-a")).json.note.body).toContain("Redis Cluster");
+  });
+
+  it("archives (never deletes) and restores a note, with the Archived view and the graph honouring it", async () => {
+    await post("/api/notes", { title: "Throwaway", body: "temporary thought", project: "w2" });
+    const arch = await post("/api/notes/archive", { id: "throwaway" }, { origin: base });
+    expect(arch.status).toBe(200);
+    expect(((await arch.json()) as { note: { status: string } }).note.status).toBe("archived");
+
+    // Hidden from the default list and the graph, but still readable and listable on demand.
+    expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).not.toContain("throwaway");
+    expect((await get("/api/notes?includeArchived=1")).json.notes.map((n: { id: string }) => n.id)).toContain("throwaway");
+    expect((await get("/api/note/throwaway")).json.note.status).toBe("archived");
+    expect((await get("/api/graph")).json.nodes.map((n: { id: string }) => n.id)).not.toContain("throwaway");
+
+    // Archiving twice is a no-op error; restoring brings it back to active.
+    expect((await post("/api/notes/archive", { id: "throwaway" })).status).toBe(409);
+    expect((await post("/api/notes/unarchive", { id: "nope" })).status).toBe(409);
+    const restored = await post("/api/notes/unarchive", { id: "throwaway" }, { origin: base });
+    expect(((await restored.json()) as { note: { status: string } }).note.status).toBe("active");
+    expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).toContain("throwaway");
   });
 });

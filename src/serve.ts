@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findConflictPairs, type ConflictNote } from "./conflicts.js";
+import { detectConflicts, findConflictPairs, type ConflictNote, type ConflictWarning } from "./conflicts.js";
 import { buildBacklinks, extractWikilinks } from "./links.js";
 import { SearchIndex } from "./search.js";
 import { slugify } from "./slug.js";
@@ -126,8 +126,9 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 
 /**
  * HTTP handler: JSON under `/api/*`, built UI everywhere else. Framework-free on purpose (ADR 5).
- * Read-only EXCEPT `POST /api/conflicts/resolve`, the Conflicts inbox's resolve action (same code path as the
- * `resolve_conflict` MCP tool, one git commit per call). That route is gated to loopback; see `writeGate`.
+ * Reads are GET-only. The mutating routes (`POST /api/notes` to create/update, `POST /api/notes/archive` and
+ * `/api/notes/unarchive`, and `POST /api/conflicts/resolve`) each record exactly one git commit and share the
+ * strict loopback write gate (`writeGate`) and the 64KB JSON reader. Write provenance source is always `web/ui`.
  * The same handler is mounted as Vite dev middleware, where `next` passes non-API requests on to Vite.
  */
 export function createHandler(opts: HandlerOptions): RequestHandler {
@@ -144,7 +145,10 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     if (route === "/api/notes") {
       const project = url.searchParams.get("project");
       const tag = url.searchParams.get("tag");
+      const includeArchived = /^(1|true)$/i.test(url.searchParams.get("includeArchived") ?? "");
       let notes = (await loadNotes()).map(summarize);
+      // Archived notes are hidden by default (never deleted); `?includeArchived=1` returns them for the Archived view.
+      if (!includeArchived) notes = notes.filter((n) => n.status !== "archived");
       const counts = new Map<string, number>();
       for (const n of notes) counts.set(n.project, (counts.get(n.project) ?? 0) + 1);
       if (project) notes = notes.filter((n) => n.project === project);
@@ -193,7 +197,8 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     }
 
     if (route === "/api/graph") {
-      const notes = await loadNotes();
+      // Archived notes (and any edges touching them) are left out of the graph; they are never deleted, only hidden.
+      const notes = (await loadNotes()).filter((n) => n.status !== "archived");
       const ids = new Set(notes.map((n) => n.id));
       const sources = notes.map((n) => ({ id: n.id, links: extractWikilinks(n.body) }));
       const backlinks = buildBacklinks(sources);
@@ -241,18 +246,25 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     return sendJson(res, 404, { error: "unknown API route" });
   }
 
-  async function resolve(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  type WriteBody = (body: Record<string, unknown>, res: http.ServerResponse) => Promise<void>;
+
+  /** Shared plumbing for every mutating route: the write gate, the 64KB JSON read, and the object check. */
+  async function handleWrite(req: http.IncomingMessage, res: http.ServerResponse, run: WriteBody): Promise<void> {
     const refused = writeGate(req);
     if (refused) return sendJson(res, 403, { error: refused });
-    let body: Record<string, unknown>;
+    let body: unknown;
     try {
-      body = (await readJson(req)) as Record<string, unknown>;
+      body = await readJson(req);
     } catch (err) {
       return sendJson(res, 400, { error: (err as Error).message });
     }
-    if (typeof body !== "object" || body === null) {
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
       return sendJson(res, 400, { error: "body must be a JSON object" });
     }
+    return run(body as Record<string, unknown>, res);
+  }
+
+  const resolveBody: WriteBody = async (body, res) => {
     const { a, b, action, note } = body;
     if (typeof a !== "string" || typeof b !== "string" || !ID_PATTERN.test(a) || !ID_PATTERN.test(b)) {
       return sendJson(res, 400, { error: "a and b must be note ids" });
@@ -268,7 +280,60 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
       // Domain errors (not in conflict, missing note, missing reconciliation) are the caller's to fix.
       return sendJson(res, 409, { error: (err as Error).message });
     }
-  }
+  };
+
+  /** Create or update a note (one commit) and return it with any contradiction warnings, like the `remember` tool. */
+  const writeNoteBody: WriteBody = async (body, res) => {
+    const { title, body: noteBody, project, tags, key, why } = body;
+    if (typeof title !== "string" || !title.trim()) return sendJson(res, 400, { error: "title is required" });
+    if (typeof noteBody !== "string" || !noteBody.trim()) return sendJson(res, 400, { error: "body is required" });
+    if (project !== undefined && typeof project !== "string") return sendJson(res, 400, { error: "project must be a string" });
+    if (tags !== undefined && (!Array.isArray(tags) || tags.some((t) => typeof t !== "string"))) {
+      return sendJson(res, 400, { error: "tags must be an array of strings" });
+    }
+    if (key !== undefined && key !== null && typeof key !== "string") return sendJson(res, 400, { error: "key must be a string" });
+    if (why !== undefined && typeof why !== "string") return sendJson(res, 400, { error: "why must be a string" });
+    try {
+      const result = await vault.writeNote(
+        { title, body: noteBody, project, tags, key: key ?? undefined },
+        { source: "web/ui", session: "web", why: why?.trim() || "saved from the web UI" },
+      );
+      const others = (await loadNotes()).filter((n) => n.id !== result.note.id).map(toConflictNote);
+      const warnings: ConflictWarning[] = detectConflicts(toConflictNote(result.note), others);
+      const saved = result.note;
+      return sendJson(res, 200, {
+        note: { ...summarize(saved), key: saved.key ?? null, created: saved.created, body: saved.body },
+        created: result.created,
+        commit: result.commit,
+        warnings,
+      });
+    } catch (err) {
+      // Reserved names and other input problems are the caller's to fix.
+      return sendJson(res, 400, { error: (err as Error).message });
+    }
+  };
+
+  /** Archive / restore a note by id (one commit). Memex never hard-deletes; archive keeps the note in git history. */
+  const setArchivedBody = (archive: boolean): WriteBody => async (body, res) => {
+    const { id } = body;
+    if (typeof id !== "string" || !ID_PATTERN.test(id)) return sendJson(res, 400, { error: "id must be a note id" });
+    try {
+      const result = archive
+        ? await vault.archiveNote(id, { source: "web/ui", session: "web", why: "archived from the web UI" })
+        : await vault.unarchiveNote(id, { source: "web/ui", session: "web", why: "restored from the web UI" });
+      return sendJson(res, 200, { note: { ...summarize(result.note), key: result.note.key ?? null }, commit: result.commit });
+    } catch (err) {
+      // Domain errors (no such note, already archived / not archived) are the caller's to fix.
+      return sendJson(res, 409, { error: (err as Error).message });
+    }
+  };
+
+  const writeRoutes: Record<string, WriteBody> = {
+    "/api/conflicts/resolve": resolveBody,
+    "/api/notes": writeNoteBody,
+    "/api/notes/archive": setArchivedBody(true),
+    "/api/notes/unarchive": setArchivedBody(false),
+  };
 
   async function serveStatic(pathname: string, method: string, res: http.ServerResponse): Promise<boolean> {
     const dist = opts.webDist;
@@ -302,17 +367,20 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
       const method = req.method ?? "GET";
       const url = new URL(req.url ?? "/", "http://localhost");
       const isApi = url.pathname === "/api" || url.pathname.startsWith("/api/");
-      if (method === "POST" && url.pathname === "/api/conflicts/resolve") {
-        try {
-          return await resolve(req, res);
-        } catch (err) {
-          return sendJson(res, 500, { error: (err as Error).message });
+      if (method === "POST") {
+        const writer = writeRoutes[url.pathname];
+        if (writer) {
+          try {
+            return await handleWrite(req, res, writer);
+          } catch (err) {
+            return sendJson(res, 500, { error: (err as Error).message });
+          }
         }
       }
       if (method !== "GET" && method !== "HEAD") {
         if (!isApi && next) return next();
         res.setHeader("allow", "GET, HEAD");
-        return sendJson(res, 405, { error: "read-only API: GET only (except POST /api/conflicts/resolve)" });
+        return sendJson(res, 405, { error: "this route is read-only (GET); writes go to the loopback-gated POST routes" });
       }
       try {
         if (isApi) return await api(url.pathname.replace(/\/+$/, ""), url, res);
