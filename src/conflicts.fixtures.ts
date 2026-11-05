@@ -226,4 +226,16 @@ export const CASES: ConflictCase[] = [
     candidate: { id: "store-b", key: "store", updated: NEW, body: "Primary store is MySQL, deployed with Docker." },
     expect: "silent",
   },
+  {
+    name: "g7: same key, shared code span, each side a DISTINCT code span on orthogonal axes -> flags (accepted twin of g1)",
+    // The irreducible cost of catching g1: a hard value flags under overlap, and we cannot tell a true
+    // clash (`todos.json` vs `todos.db`) from complementary facets (a log path vs a metrics sink) without
+    // semantics. We accept the flag -- hard values are far more often THE contested value than a bare name,
+    // and the warning is advisory (silence it with Supersedes:/Reconciled with:). Pinned so a future tweak
+    // to `isHardValue` cannot shift this boundary unnoticed.
+    existing: [{ id: "svc-config-a", key: "service-config", status: "active", updated: OLD, body: "Config `config.json`; logs to `/var/log/app`." }],
+    candidate: { id: "svc-config-b", key: "service-config", updated: NEW, body: "Config `config.json`; metrics via `statsd-x`." },
+    expect: "flag",
+    flags: "svc-config-a",
+  },
 ];
