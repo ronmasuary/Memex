@@ -2,6 +2,24 @@ import { useEffect, useRef, useState } from "react";
 import { writeNote, type ContradictionWarning, type NoteDetail } from "./api";
 import { Icon } from "./icons";
 
+const MAX_SLUG_LENGTH = 60;
+
+/**
+ * Preview the note id the server will derive from a title. Mirrors `slugify` in `src/slug.ts` so the
+ * editor can warn, before saving, when editing a note's title would land on a *different* id — which
+ * the server treats as a brand-new note, silently leaving the original behind (Memex has no rename).
+ */
+function previewSlug(title: string): string {
+  return title
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+}
+
 /**
  * Create / edit a note. One save = one git commit (provenance source `web/ui`). After saving, any contradiction
  * warnings returned by the server are shown inline so the writer sees the collision before leaving the editor.
@@ -75,6 +93,11 @@ export function Editor({
 
   const projectOptions = [...new Set([...projects, project].filter(Boolean))].sort();
 
+  // Editing an existing note whose new title slugifies to a different id: the server would create a
+  // new note and leave the original untouched. Surface that instead of silently duplicating.
+  const newId = previewSlug(title);
+  const willFork = !!initial && newId.length > 0 && newId !== initial.note.id;
+
   return (
     <div className={`modal${open ? " on" : ""}`} aria-hidden={!open}>
       <div className="sheet" role="dialog" aria-modal="true" aria-label={initial ? "Edit note" : "New note"}>
@@ -87,6 +110,12 @@ export function Editor({
           <div className="field">
             <label htmlFor="ed-ttl">Title</label>
             <input id="ed-ttl" ref={titleRef} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A short, declarative title" />
+            {willFork && (
+              <p className="fh" style={{ color: "var(--warn, #b45309)" }}>
+                A note's id comes from its title and can't be renamed. Saving this title creates a <b>new</b> note
+                (<code className="mono">{newId}</code>) and leaves <code className="mono">{initial!.note.id}</code> as it was.
+              </p>
+            )}
           </div>
           <div className="frow">
             <div className="field">
@@ -142,7 +171,7 @@ export function Editor({
           <div style={{ marginLeft: "auto", display: "flex", gap: 9 }}>
             <button className="btn" onClick={onClose}>{warnings.length > 0 ? "Done" : "Cancel"}</button>
             <button className="btn primary" disabled={busy || !title.trim() || !body.trim()} onClick={save}>
-              {initial ? "Save note" : "Create note"}
+              {!initial ? "Create note" : willFork ? "Save as new note" : "Save note"}
             </button>
           </div>
         </div>
