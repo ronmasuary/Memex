@@ -21,13 +21,20 @@ these are UX and eval improvements.
 - [ ] **Exercise the contradiction warning in the dogfood/eval.** A naive single build uses
   distinct keys and never trips it. Add a step that deliberately reuses a `key` with a new
   value and asserts the WARNING fires.
-- [ ] **The detector may be too hard to trip in practice.** In the cold second session, an
+- [x] **The detector may be too hard to trip in practice.** In the cold second session, an
   agent wrote a note with the existing `key: storage-choice` and a different value (SQLite),
   explicitly saying "Conflicts with [[adr-0002]]" — and NO warning fired, because the note
   also mentioned "JSON" (shared token) and was framed as an unimplemented *proposal*. This is
   defensible under-flagging, but it means the headline feature is hard to surface naturally.
-  Decide: treat a reused `key` with a clearly different asserted value more assertively, or at
-  least document how to phrase a note so a real contradiction is caught.
+  **Fixed (surgical).** `differingValues` rule (a) in `src/conflicts.ts` no longer grants
+  blanket immunity on *any* shared value token. It now compares each side's **distinctive**
+  values (those the other side lacks): it flags only when **both** sides assert at least one
+  distinctive value, so incidental overlap (`json`, `TODO_FILE`) can't mask a real
+  JSON-file-vs-SQLite contradiction. A note whose values are a *subset* of the other's
+  (a restatement or a refinement) still has no distinctive value, so it stays silent — as do
+  explicit `Supersedes:`/`Reconciled with:` pairs, which are short-circuited upstream. New
+  fixtures `g1` (the positive) and `g2`–`g4` (restatement/supersede/reconcile guards, all
+  silent despite overlap) lock this in.
 
 ## Insight
 

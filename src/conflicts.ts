@@ -135,11 +135,17 @@ function differingValues(existing: string, candidate: string): { existing: strin
   const a = split(valueTokens(existing));
   const b = split(valueTokens(candidate));
 
-  // (a) Named values: both sides name something, and they share none of it -> different thing asserted.
+  // (a) Named values: both sides name something, and EACH asserts at least one value the other lacks.
+  //     Sharing some tokens no longer buys immunity: incidental overlap (both notes mention `json` or
+  //     `todo_file`) used to mask a real contradiction whose distinctive values were buried under it
+  //     ("single JSON file `todos.json`" vs "SQLite ... `todos.db`"). We now compare the *distinctive*
+  //     values on each side. A note whose values are a subset of the other's asserts nothing new -- that
+  //     is a restatement or a refinement, not a contradiction -- so one empty distinctive set stays silent.
   if (a.words.size > 0 && b.words.size > 0) {
-    const shared = [...a.words].some((w) => b.words.has(w));
-    if (!shared) return { existing: [...a.words].sort(), candidate: [...b.words].sort() };
-    return null; // a shared name means the notes talk about the same value; stay silent.
+    const aOnly = [...a.words].filter((w) => !b.words.has(w)).sort();
+    const bOnly = [...b.words].filter((w) => !a.words.has(w)).sort();
+    if (aOnly.length > 0 && bOnly.length > 0) return { existing: aOnly, candidate: bOnly };
+    return null; // one side's values subsume the other's: same thing, restated or refined. Stay silent.
   }
 
   // (b) Numeric values with the same unit and no number in common, e.g. `Postgres 16` vs `Postgres 15`.

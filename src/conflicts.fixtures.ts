@@ -135,4 +135,77 @@ export const CASES: ConflictCase[] = [
     candidate: { id: "thru", key: "budget", updated: NEW, body: "throughput is 200 per second" },
     expect: "silent",
   },
+
+  // (g) a reused key whose differing values are BURIED UNDER INCIDENTAL OVERLAP must still flag.
+  //     The dogfood miss: both notes mention `json` and `TODO_FILE`, but one asserts a JSON file and the
+  //     other SQLite. Shared tokens used to mask it; each side's distinctive values now carry the day.
+  {
+    name: "g1: same key, json-file vs sqlite with shared `TODO_FILE`/`json` tokens -> MUST flag",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path; writes are atomic via temp+rename.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence. The DB lives at `todos.db`; the `TODO_FILE` path points to it.",
+    },
+    expect: "flag",
+    flags: "json-store",
+  },
+  // guards: the new positive condition (both sides have distinctive values) must still defer to the
+  // existing silence rules -- a subset restatement, an explicit supersede, and a reconcile all stay quiet
+  // even though `json`/`TODO_FILE` overlap and each note names something the other does not.
+  {
+    name: "g2: restatement that drops detail (B's values subset A's) under the overlap key -> silent",
+    existing: [
+      { id: "json-store", key: "storage-choice", status: "active", updated: OLD, body: "Persist todos in a single JSON file `todos.json`, tracking `nextId`." },
+    ],
+    candidate: { id: "json-restated", key: "storage-choice", updated: NEW, body: "Todos are kept in a JSON file `todos.json`." },
+    expect: "silent",
+  },
+  {
+    name: "g3: sqlite note that explicitly supersedes the json note (with overlap) -> silent",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence; the DB lives at `todos.db`, reached via the `TODO_FILE` path.\n\nSupersedes: [[json-store]]",
+    },
+    expect: "silent",
+  },
+  {
+    name: "g4: json and sqlite notes reconciled as keep-both (with overlap) -> silent",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence; the DB lives at `todos.db`, reached via the `TODO_FILE` path.\n\nReconciled with: [[json-store]]",
+    },
+    expect: "silent",
+  },
 ];
