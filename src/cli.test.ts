@@ -1,6 +1,9 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { run, type Io } from "./cli.js";
+import { initVault, type Vault } from "./vault.js";
 
 /** Capture stdout/stderr from a CLI run. */
 function capture() {
@@ -54,5 +57,26 @@ describe("memex mcp-config", () => {
     const { io, err } = capture();
     await run(["mcp-config", "--vault", "/definitely/not/a/vault"], io);
     expect(err.join("\n")).toMatch(/is not a Memex vault yet/);
+  });
+});
+
+describe("memex find --project", () => {
+  let dir: string;
+  let vault: Vault;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "memex-cli-find-"));
+    vault = await initVault(path.join(dir, "vault"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  });
+
+  it("slugifies the project so a human-readable name matches the stored slug", async () => {
+    await vault.writeNote({ title: "Alpha", body: "alpha note about storage", project: "My Project" }, { source: "test/agent" });
+    const { io, out } = capture();
+    // "My Project" is stored under the slug `my-project`; without slugifying, an exact `===` matched nothing.
+    const code = await run(["find", "storage", "--vault", vault.root, "--project", "My Project"], io);
+    expect(code).toBe(0);
+    expect(out.join("\n")).toContain("alpha");
   });
 });

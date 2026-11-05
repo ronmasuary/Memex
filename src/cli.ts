@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { gitFor, type CommitAuthor } from "./git.js";
 import { DEFAULT_LIMIT, SearchIndex } from "./search.js";
 import { DEFAULT_PORT, DEFAULT_WEB_DIST, startServer } from "./serve.js";
+import { slugify } from "./slug.js";
 import { initVault, Vault } from "./vault.js";
 
 const USAGE = `memex <command>
@@ -133,7 +134,9 @@ export async function run(argv: string[], io: Io = processIo): Promise<number> {
         const limit = values.limit ? Number.parseInt(values.limit, 10) : DEFAULT_LIMIT;
         if (!Number.isInteger(limit) || limit < 1) throw new Error("--limit must be a positive integer");
         const hits = await new SearchIndex(resolveVault(values.vault)).search(query, {
-          project: values.project,
+          // Stored notes live under a slugified project dir, so match the way the write path and the
+          // `recall` MCP tool slugify; otherwise `--project "My Project"` matches nothing.
+          project: values.project ? slugify(values.project) : undefined,
           limit,
         });
         if (hits.length === 0) io.err("No matches.");
