@@ -63,7 +63,8 @@ export function Editor({
         title: title.trim(), body, project: project.trim() || undefined,
         tags, key: key.trim() || null, why: why.trim() || undefined,
       });
-      onSaved(`${r.created ? "Note created" : "Saved"}${r.commit ? ` · commit ${r.commit.slice(0, 7)}` : ""}`);
+      const verb = r.created ? "Note created" : r.revived ? "Restored from archive" : "Saved";
+      onSaved(`${verb}${r.commit ? ` · commit ${r.commit.slice(0, 7)}` : ""}`);
       if (r.warnings.length > 0) { setWarnings(r.warnings); setBusy(false); }
       else onClose();
     } catch (e) {

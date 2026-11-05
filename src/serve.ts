@@ -305,6 +305,7 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
       return sendJson(res, 200, {
         note: { ...summarize(saved), key: saved.key ?? null, created: saved.created, body: saved.body },
         created: result.created,
+        revived: result.revived,
         commit: result.commit,
         warnings,
       });

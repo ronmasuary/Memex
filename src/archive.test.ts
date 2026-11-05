@@ -60,6 +60,39 @@ describe("Vault.archiveNote / unarchiveNote", () => {
   });
 });
 
+describe("re-remembering an archived note revives it", () => {
+  it("brings the note back to active so the rewrite is actually recallable, and flags the revive", async () => {
+    await vault.writeNote({ title: "Temp fact", body: "old content", project: "memex" }, prov);
+    await vault.archiveNote("temp-fact", prov);
+
+    // A plain `remember` on the archived title is an intentional rewrite: it must revive, not stay hidden.
+    const r = await vault.writeNote({ title: "Temp fact", body: "new content", project: "memex" }, prov);
+    expect(r.revived).toBe(true);
+    expect(r.created).toBe(false);
+    expect(r.note.status).toBe("active");
+    expect((await vault.findById("temp-fact"))!.status).toBe("active");
+
+    const index = new SearchIndex(vault);
+    expect((await index.search("content")).map((h) => h.id)).toContain("temp-fact");
+  });
+
+  it("does not revive when the caller sets status explicitly, and a normal update sets revived=false", async () => {
+    await vault.writeNote({ title: "Keep archived", body: "v1", project: "memex" }, prov);
+    await vault.archiveNote("keep-archived", prov);
+    // An explicit status wins over the revive-on-rewrite default.
+    const kept = await vault.writeNote({ title: "Keep archived", body: "v2", project: "memex", status: "archived" }, prov);
+    expect(kept.revived).toBe(false);
+    expect(kept.note.status).toBe("archived");
+
+    const plain = await vault.writeNote({ title: "Active note", body: "v1", project: "memex" }, prov);
+    expect(plain.created).toBe(true);
+    expect(plain.revived).toBe(false);
+    const update = await vault.writeNote({ title: "Active note", body: "v2", project: "memex" }, prov);
+    expect(update.created).toBe(false);
+    expect(update.revived).toBe(false);
+  });
+});
+
 describe("archived notes are ignored by contradiction detection", () => {
   it("drops a colliding pair when either note is archived, and restores it on un-archive", async () => {
     await vault.writeNote({ title: "Store old", body: "We use Postgres.", project: "memex", key: "storage-choice" }, prov);

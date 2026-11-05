@@ -70,6 +70,12 @@ export interface ResolveResult {
 export interface WriteResult {
   note: Note;
   created: boolean;
+  /**
+   * True when this write brought an archived note back to `active` (a plain rewrite of an archived
+   * title). The caller should tell the writer, since otherwise the save would look fine but stay
+   * hidden from recall, search and the graph.
+   */
+  revived: boolean;
   /** SHA of the provenance commit; null when the vault is not a git repo or `commit: false`. */
   commit: string | null;
 }
@@ -250,6 +256,12 @@ export class Vault {
     assertSafeFilename(`${id}.md`);
 
     const previous = existing.get(id);
+    // A plain `remember` that lands on an archived note is an intentional rewrite: revive it to
+    // `active` so the fresh content is actually recallable (archived notes are hidden from search,
+    // the graph and contradiction detection). An explicit `status` still wins, so archive/unarchive
+    // and any deliberate status write keep their meaning. This keeps the "one current value per key"
+    // model honest — a revived note rejoins contradiction detection like any other active note.
+    const reviving = input.status === undefined && previous?.status === "archived";
     const now = new Date().toISOString();
     const note: Omit<Note, "path" | "hash"> = {
       id,
@@ -258,7 +270,7 @@ export class Vault {
       tags: input.tags ?? previous?.tags ?? [],
       // `null` explicitly clears the key; `undefined` keeps whatever the note had.
       key: input.key === null ? undefined : (input.key ?? previous?.key),
-      status: input.status ?? previous?.status ?? "active",
+      status: input.status ?? (reviving ? "active" : previous?.status) ?? "active",
       source: prov.source,
       session: prov.session,
       why: prov.why,
@@ -276,7 +288,7 @@ export class Vault {
       const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
       sha = await gitFor(this.root).commit([relPath], commitMessage(id, !previous, prov), author);
     }
-    return { note: saved, created: !previous, commit: sha };
+    return { note: saved, created: !previous, revived: reviving, commit: sha };
   }
 
   /**
@@ -324,7 +336,7 @@ export class Vault {
       const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
       sha = await gitFor(this.root).commit([relPath], statusCommitMessage(archive ? "archive" : "restore", id, prov), author);
     }
-    return { note: saved, created: false, commit: sha };
+    return { note: saved, created: false, revived: false, commit: sha };
   }
 
   /**

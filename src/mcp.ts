@@ -76,7 +76,8 @@ export function createServer(vault: Vault): McpServer {
           .filter((n) => n.id !== result.note.id)
           .map(toConflictNote);
         const warnings = detectConflicts(toConflictNote(result.note), others);
-        const lines = [`${result.created ? "Saved" : "Updated"} note ${result.note.id} (${result.note.path}).`];
+        const verb = result.created ? "Saved" : result.revived ? "Restored from archive and updated" : "Updated";
+        const lines = [`${verb} note ${result.note.id} (${result.note.path}).`];
         if (result.commit) lines.push(`Commit: ${result.commit.slice(0, 7)}`);
         for (const w of warnings) {
           lines.push("", `WARNING: ${w.message}`);

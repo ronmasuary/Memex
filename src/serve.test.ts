@@ -160,4 +160,14 @@ describe("POST /api/notes (create / update) and archive routes", () => {
     expect(((await restored.json()) as { note: { status: string } }).note.status).toBe("active");
     expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).toContain("throwaway");
   });
+
+  it("revives an archived note when its title is saved again, and says so", async () => {
+    await post("/api/notes", { title: "Revive me", body: "v1", project: "w3" });
+    await post("/api/notes/archive", { id: "revive-me" }, { origin: base });
+    const again = await post("/api/notes", { title: "Revive me", body: "v2", project: "w3" }, { origin: base });
+    const j = (await again.json()) as { revived: boolean; note: { status: string } };
+    expect(j.revived).toBe(true);
+    expect(j.note.status).toBe("active");
+    expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).toContain("revive-me");
+  });
 });

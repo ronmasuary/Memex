@@ -6,10 +6,11 @@ import path from "node:path";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "./mcp.js";
-import { initVault } from "./vault.js";
+import { initVault, type Vault } from "./vault.js";
 
 let dir: string;
 let client: Client;
+let vault: Vault;
 
 async function call(name: string, args: Record<string, unknown>): Promise<string> {
   const res = await client.callTool({ name, arguments: args });
@@ -19,7 +20,7 @@ async function call(name: string, args: Record<string, unknown>): Promise<string
 
 beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "memex-mcp-"));
-  const vault = await initVault(path.join(dir, "vault"));
+  vault = await initVault(path.join(dir, "vault"));
   const server = createServer(vault);
   const [a, b] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: "test-client", version: "1.0.0" });
@@ -94,6 +95,17 @@ describe("memex MCP server (in-memory transport)", () => {
     expect(await call("list_tags", {})).toContain("decision (1)");
     expect(await call("list_notes", { project: "memex", tag: "decision" })).toContain("storage-decision");
     expect(await call("get_backlinks", { id: "storage-decision" })).toContain("storage-final");
+  });
+
+  it("remember revives an archived note and says it was restored", async () => {
+    await call("remember", { title: "Scratch fact", body: "first take", project: "memex" });
+    await vault.archiveNote("scratch-fact", { source: "test", why: "cleanup" });
+    // Hidden while archived.
+    expect(await call("recall", { query: "take" })).toContain("No matching notes.");
+
+    const again = await call("remember", { title: "Scratch fact", body: "second take", project: "memex" });
+    expect(again).toContain("Restored from archive and updated note scratch-fact");
+    expect(await call("recall", { query: "second" })).toContain("[id: scratch-fact]");
   });
 
   it("one remember makes exactly one commit", async () => {

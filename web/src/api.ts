@@ -116,6 +116,8 @@ export interface NoteInput {
 export interface WriteNoteResult {
   note: NoteSummary & { key: string | null; created: string; body: string };
   created: boolean;
+  /** True when this save brought an archived note back to active. */
+  revived: boolean;
   commit: string | null;
   warnings: ContradictionWarning[];
 }
