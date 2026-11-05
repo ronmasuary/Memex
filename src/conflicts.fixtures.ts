@@ -120,4 +120,19 @@ export const CASES: ConflictCase[] = [
     candidate: { id: "storage-decision", key: "storage-choice", updated: NEW, body: "We store notes in SQLite." },
     expect: "silent",
   },
+
+  // (f) numeric contradictions must not be lost to differently-phrased prose around the number.
+  {
+    name: "f1: same numeric fact, different trailing word on each side (unit must be adjacency-only)",
+    existing: [{ id: "port-old", key: "service-port", status: "active", updated: OLD, body: "runs on 3000 by default" }],
+    candidate: { id: "port-new", key: "service-port", updated: NEW, body: "listens on 8080 now" },
+    expect: "flag",
+    flags: "port-old",
+  },
+  {
+    name: "f2: a genuinely-attached unit still distinguishes buckets (200ms vs 200 requests is not a clash)",
+    existing: [{ id: "lat", key: "budget", status: "active", updated: OLD, body: "latency budget is 200ms" }],
+    candidate: { id: "thru", key: "budget", updated: NEW, body: "throughput is 200 per second" },
+    expect: "silent",
+  },
 ];

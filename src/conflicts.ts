@@ -89,8 +89,10 @@ export function valueTokens(body: string): Set<string> {
   for (const m of body.matchAll(/`([^`\n]+)`/g)) values.add(`\`${m[1]!.trim().toLowerCase()}`);
   const prose = body.replace(/`[^`\n]*`/g, " ").replace(/\[\[[^\]]*\]\]/g, " ");
 
-  // Numbers (optionally with a unit suffix/following unit word handled by pairing below).
-  for (const m of prose.matchAll(/\b(\d+(?:[.,]\d+)*)\s*(%|[a-zA-Z]{1,12})?/g)) {
+  // Numbers, keeping only a unit that is directly attached (`200ms`, `50%`, `16gb`). A unit must NOT
+  // reach across whitespace to grab the next prose word: "16 seconds" and "16 workers" would then sit
+  // in different buckets and never compare, so a real numeric contradiction phrased two ways is missed.
+  for (const m of prose.matchAll(/\b(\d+(?:[.,]\d+)*)(%|[a-zA-Z]{1,12})?/g)) {
     values.add(`#${m[1]}${m[2] ? `~${m[2].toLowerCase()}` : ""}`);
   }
 
