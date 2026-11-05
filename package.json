@@ -9,6 +9,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:web": "npm --prefix web run build",
+    "build:all": "npm run build && npm run build:web",
+    "setup": "npm install && npm --prefix web install && npm run build:all",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run"

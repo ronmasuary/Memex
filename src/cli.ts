@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, realpathSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -15,6 +16,8 @@ const USAGE = `memex <command>
   reindex [--vault <dir>]                rebuild the search index from markdown
   find <query> [--vault <dir>] [--project <p>] [--limit <n>]
   serve [--vault <dir>] [--port <n>]     browse the vault in the browser (default port 4321)
+  mcp-config [--vault <dir>] [--host claude|cursor] [--name <n>]
+                                         print ready-to-paste MCP host config (resolved absolute paths)
 
 The vault is --vault, else $MEMEX_VAULT, else the current directory.
 init stamps the committer identity onto the new vault's git config; without a flag it
@@ -49,6 +52,27 @@ function resolveInitIdentity(values: { name?: string; email?: string; author?: s
   if (name && email) return { name, email };
   if (name || email) throw new Error(`set both --name and --email (or use --author "Your Name <you@example.com>")`);
   return undefined;
+}
+
+type McpHost = "claude" | "cursor";
+
+/** Absolute path to the built MCP stdio entry (`dist/mcp.js`), which sits next to this CLI file. */
+function mcpEntryPath(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "mcp.js");
+}
+
+/** Where the given host reads its MCP server config — a concrete path for this OS. */
+function hostConfigPath(host: McpHost): string {
+  const home = os.homedir();
+  if (host === "cursor") return path.join(home, ".cursor", "mcp.json");
+  switch (process.platform) {
+    case "win32":
+      return path.join(process.env.APPDATA ?? path.join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+    case "darwin":
+      return path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    default:
+      return path.join(home, ".config", "Claude", "claude_desktop_config.json");
+  }
 }
 
 function resolveVault(flag: string | undefined): Vault {
@@ -131,6 +155,36 @@ export async function run(argv: string[], io: Io = processIo): Promise<number> {
         const actual = typeof addr === "object" && addr ? addr.port : port;
         io.out(`Memex UI + API on http://127.0.0.1:${actual}  (Ctrl+C to stop)`);
         if (!existsSync(DEFAULT_WEB_DIST)) io.err("web/dist not found: only /api is served. Run `npm --prefix web run build`.");
+        return 0;
+      }
+      case "mcp-config": {
+        const { values } = parseArgs({
+          args: rest,
+          options: {
+            vault: { type: "string" },
+            host: { type: "string" },
+            name: { type: "string" },
+          },
+        });
+        const host = (values.host ?? "claude") as McpHost;
+        if (host !== "claude" && host !== "cursor") throw new Error(`--host must be claude or cursor`);
+        const name = (values.name ?? "").trim() || "memex";
+        const vault = path.resolve(values.vault ?? process.env.MEMEX_VAULT ?? path.join(os.homedir(), "memex-vault"));
+        const mcpJs = mcpEntryPath();
+        // `command` is the absolute node binary and `args[0]` the absolute server path, because
+        // desktop hosts can't resolve `npx` or a PATH `bin`. JSON.stringify escapes Windows backslashes.
+        const block = {
+          mcpServers: {
+            [name]: { command: process.execPath, args: [mcpJs], env: { MEMEX_VAULT: vault } },
+          },
+        };
+        io.out(JSON.stringify(block, null, 2));
+        const hostLabel = host === "cursor" ? "Cursor" : "Claude Desktop";
+        io.err("");
+        io.err(`Merge the block above into ${hostLabel}'s MCP config, then fully restart ${hostLabel}:`);
+        io.err(`  ${hostConfigPath(host)}`);
+        if (!existsSync(mcpJs)) io.err(`WARNING: ${mcpJs} does not exist yet — run \`npm run build\` first.`);
+        if (!existsSync(path.join(vault, "memex.json"))) io.err(`Note: ${vault} is not a Memex vault yet — run \`memex init "${vault}"\` first.`);
         return 0;
       }
       case undefined:

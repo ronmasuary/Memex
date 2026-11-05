@@ -26,54 +26,15 @@ You have a persistent, git-backed memory via the `memex` MCP server.
 | `list_tags(project?)` | Tags with counts |
 | `resolve_conflict(a, b, action, note?, why?)` | `keep_a`, `keep_b` or `keep_both` (needs `note`); one commit |
 
-## Wiring up Claude Desktop
+## Wiring up Claude Desktop or Cursor
 
-Create a vault first (`node dist/cli.js init <dir>`), build (`npm run build`), then add the server to the Claude Desktop config. Use **absolute paths** to `node` and `dist/mcp.js` — `npx` is often not resolvable from the desktop app's environment. Restart Claude Desktop afterwards.
+Build and create a vault first (`npm run setup`, then `memex init <dir>`), then let Memex print the config block with absolute paths already resolved — `npx` and PATH `bin`s are often not resolvable from desktop apps:
 
-**macOS** — `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "memex": {
-      "command": "/usr/local/bin/node",
-      "args": ["/Users/you/projects/Memex/dist/mcp.js"],
-      "env": { "MEMEX_VAULT": "/Users/you/memex-vault" }
-    }
-  }
-}
+```bash
+memex mcp-config --vault <dir>              # Claude Desktop (default)
+memex mcp-config --vault <dir> --host cursor # Cursor
 ```
 
-**Windows** — `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "memex": {
-      "command": "C:\\Program Files\\nodejs\\node.exe",
-      "args": ["C:\\Users\\you\\projects\\Memex\\dist\\mcp.js"],
-      "env": { "MEMEX_VAULT": "C:\\Users\\you\\memex-vault" }
-    }
-  }
-}
-```
-
-Find your node path with `which node` (macOS) or `where node` (Windows). Keep the vault out of Dropbox/iCloud/OneDrive.
+It prints a ready-to-paste `mcpServers` block and names the config file to merge it into for your OS (Claude Desktop: `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows; Cursor: `~/.cursor/mcp.json` global or `.cursor/mcp.json` per project). Merge it, then **fully restart the host**. Keep the vault out of Dropbox/iCloud/OneDrive.
 
 The server speaks MCP over stdio, so it logs only to stderr; never add `console.log` to `src/`.
-
-## Wiring up Cursor
-
-Add the same server to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per project), again with absolute paths. On Windows use the `C:\...` forms from above.
-
-```json
-{
-  "mcpServers": {
-    "memex": {
-      "command": "/usr/local/bin/node",
-      "args": ["/Users/you/projects/Memex/dist/mcp.js"],
-      "env": { "MEMEX_VAULT": "/Users/you/memex-vault" }
-    }
-  }
-}
-```

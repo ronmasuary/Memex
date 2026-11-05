@@ -34,11 +34,13 @@ Needs Node 20+ and git.
 
 ```bash
 git clone https://github.com/ronmasuary/Memex.git && cd Memex
-npm install && npm run build           # MCP server + CLI -> dist/
-npm --prefix web install && npm --prefix web run build   # browse UI -> web/dist
-node dist/cli.js init ~/memex-vault    # creates a git repo with a seed note
-node dist/cli.js serve --vault ~/memex-vault   # http://127.0.0.1:4321
+npm run setup                          # installs + builds server, CLI (dist/) and UI (web/dist/)
+npm link                               # optional: puts the `memex` command on your PATH
+memex init ~/memex-vault               # creates a git repo with a seed note
+memex serve --vault ~/memex-vault      # http://127.0.0.1:4321
 ```
+
+No `npm link`? Run the same commands as `node dist/cli.js init …` / `node dist/cli.js serve …`.
 
 Keep the vault out of Dropbox, iCloud and OneDrive (cloud sync plus git corrupts `.git`). `memex find <query>` searches from the terminal.
 
@@ -46,49 +48,28 @@ Each vault is its own git repo. `memex init` stamps a committer identity onto it
 
 ## Connect an MCP host
 
-Use **absolute paths** to `node` and `dist/mcp.js`; `npx` is often not resolvable from desktop apps. Find node with `which node` (macOS) or `where node` (Windows), then restart the host.
+Desktop hosts can't resolve `npx` or a PATH `bin`, so the config needs **absolute paths** to `node` and `dist/mcp.js`. Instead of hand-writing them (and escaping backslashes on Windows), let Memex print the exact block with paths already resolved:
 
-**Claude Desktop, macOS** — `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```bash
+memex mcp-config --vault ~/memex-vault              # Claude Desktop (default)
+memex mcp-config --vault ~/memex-vault --host cursor # Cursor
+```
+
+It prints a ready-to-paste `mcpServers` block and tells you which file to merge it into for your OS. Merge it, then **fully restart the host**. For reference, the block looks like this (your paths will be absolute and OS-correct):
 
 ```json
 {
   "mcpServers": {
     "memex": {
-      "command": "/usr/local/bin/node",
-      "args": ["/Users/you/projects/Memex/dist/mcp.js"],
-      "env": { "MEMEX_VAULT": "/Users/you/memex-vault" }
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/Memex/dist/mcp.js"],
+      "env": { "MEMEX_VAULT": "/absolute/path/to/memex-vault" }
     }
   }
 }
 ```
 
-**Claude Desktop, Windows** — `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "memex": {
-      "command": "C:\\Program Files\\nodejs\\node.exe",
-      "args": ["C:\\Users\\you\\projects\\Memex\\dist\\mcp.js"],
-      "env": { "MEMEX_VAULT": "C:\\Users\\you\\memex-vault" }
-    }
-  }
-}
-```
-
-**Cursor** — `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project); same shape, same absolute-path rule:
-
-```json
-{
-  "mcpServers": {
-    "memex": {
-      "command": "/usr/local/bin/node",
-      "args": ["/Users/you/projects/Memex/dist/mcp.js"],
-      "env": { "MEMEX_VAULT": "/Users/you/memex-vault" }
-    }
-  }
-}
-```
+Config file locations: Claude Desktop — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows); Cursor — `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per project).
 
 Hosts don't call memory tools unprompted. Paste the short block from [MEMEX.md](MEMEX.md) into your `CLAUDE.md` or Cursor rules so the agent actually uses them.
 
