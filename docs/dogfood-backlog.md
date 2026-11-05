@@ -34,3 +34,10 @@ these are UX and eval improvements.
 - Single-session builds barely benefit from memory — `recall` mostly *confirms* what is
   still in context rather than recovering anything lost. Memex's value shows **across
   sessions / after context loss**, so dogfoods and evals should span multiple sessions.
+
+## Web UI
+
+- [ ] **Graph zoom/fit icon buttons drift off the bottom-right edge and are only partially
+  visible.** The zoom-in / zoom-out / fit-to-screen controls aren't fully anchored inside the
+  canvas padding, so at some sizes they clip past the bottom-right corner. Anchor them within
+  the visible canvas and keep them fully on-screen at all viewport widths.
