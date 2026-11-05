@@ -170,4 +170,16 @@ describe("POST /api/notes (create / update) and archive routes", () => {
     expect(j.note.status).toBe("active");
     expect((await get("/api/notes")).json.notes.map((n: { id: string }) => n.id)).toContain("revive-me");
   });
+
+  it("keeps project-facet counts stable whether or not archived notes are included", async () => {
+    await post("/api/notes", { title: "Facet one", body: "x", project: "facet" });
+    await post("/api/notes", { title: "Facet two", body: "y", project: "facet" });
+    await post("/api/notes/archive", { id: "facet-two" }, { origin: base });
+    const count = (j: Record<string, any>) => // eslint-disable-line @typescript-eslint/no-explicit-any
+      (j.projects as { name: string; count: number }[]).find((p) => p.name === "facet")?.count ?? 0;
+    const plain = (await get("/api/notes")).json;
+    const incl = (await get("/api/notes?includeArchived=1")).json;
+    expect(count(plain)).toBe(1); // one active note remains in the facet
+    expect(count(incl)).toBe(count(plain)); // including archived must not change the facet count
+  });
 });

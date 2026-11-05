@@ -146,11 +146,13 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
       const project = url.searchParams.get("project");
       const tag = url.searchParams.get("tag");
       const includeArchived = /^(1|true)$/i.test(url.searchParams.get("includeArchived") ?? "");
-      let notes = (await loadNotes()).map(summarize);
-      // Archived notes are hidden by default (never deleted); `?includeArchived=1` returns them for the Archived view.
-      if (!includeArchived) notes = notes.filter((n) => n.status !== "archived");
+      const all = (await loadNotes()).map(summarize);
+      // The project facet always counts active notes, so toggling `includeArchived` never changes the
+      // counts (archived notes are hidden navigation, not part of the live project totals).
       const counts = new Map<string, number>();
-      for (const n of notes) counts.set(n.project, (counts.get(n.project) ?? 0) + 1);
+      for (const n of all) if (n.status !== "archived") counts.set(n.project, (counts.get(n.project) ?? 0) + 1);
+      // Archived notes are hidden by default (never deleted); `?includeArchived=1` returns them for the Archived view.
+      let notes = includeArchived ? all : all.filter((n) => n.status !== "archived");
       if (project) notes = notes.filter((n) => n.project === project);
       if (tag) notes = notes.filter((n) => n.tags.includes(tag));
       notes.sort((a, b) => b.updated.localeCompare(a.updated) || a.id.localeCompare(b.id));
