@@ -82,6 +82,17 @@ function normalizeBody(body: string): string {
 
 const NUMBER = /^\d+(?:[.,]\d+)*$/;
 
+/**
+ * A "hard" value token is a concrete, contested value rather than a bare name: a `code span`
+ * (stored with a leading backtick), a dotted/underscored identifier (`todos.json`, `todo_file`,
+ * `db.internal`), or any token carrying a digit (`node18`, `us-east-1`). Plain proper nouns and
+ * acronyms (`postgres`, `aws`, `db`) are soft. Used only to decide whether a *reused-key* pair that
+ * also shares a token clashes (hard difference) or merely names complementary facets (soft).
+ */
+function isHardValue(word: string): boolean {
+  return word.startsWith("`") || /[._-]/.test(word) || /\d/.test(word);
+}
+
 /** Fact-bearing tokens. Lowercased; numbers keep a following unit so `200ms` != `200 users`. */
 export function valueTokens(body: string): Set<string> {
   const values = new Set<string>();
@@ -135,11 +146,28 @@ function differingValues(existing: string, candidate: string): { existing: strin
   const a = split(valueTokens(existing));
   const b = split(valueTokens(candidate));
 
-  // (a) Named values: both sides name something, and they share none of it -> different thing asserted.
+  // (a) Named values. Each side must assert at least one value the other lacks: if one side's values
+  //     are a subset of the other's, nothing new is claimed (a restatement or a refinement), so we stay
+  //     silent. Among the values that differ, we then ask how much the notes overlap:
+  //       - They share NO value token -> they plainly disagree, so any distinctive named value flags.
+  //         (This subsumes the old no-overlap rule unchanged.)
+  //       - They share a value token -> they are at least partly about the same thing. Incidental
+  //         overlap must not mask a real contradiction whose values are buried under it
+  //         ("single JSON file `todos.json`" vs "SQLite ... `todos.db`"), but a bare proper-noun
+  //         difference under overlap is as likely two complementary facets ("Postgres, on AWS" vs
+  //         "Postgres, via PgBouncer") as a genuine clash. We cannot tell those apart without
+  //         semantics, so we only flag when each side's distinctive set carries a HARD value -- a
+  //         `code span`, a dotted/underscored identifier, or a token bearing a digit -- which is what
+  //         a concrete contested value (a filename, path, key, or version) looks like. Soft-only
+  //         differences under overlap stay silent (the conservative default; a miss, never a cry-wolf).
   if (a.words.size > 0 && b.words.size > 0) {
-    const shared = [...a.words].some((w) => b.words.has(w));
-    if (!shared) return { existing: [...a.words].sort(), candidate: [...b.words].sort() };
-    return null; // a shared name means the notes talk about the same value; stay silent.
+    const aOnly = [...a.words].filter((w) => !b.words.has(w)).sort();
+    const bOnly = [...b.words].filter((w) => !a.words.has(w)).sort();
+    if (aOnly.length === 0 || bOnly.length === 0) return null; // subset: restatement or refinement
+    const sharesToken = a.words.size !== aOnly.length; // some value token appears on both sides
+    if (!sharesToken) return { existing: aOnly, candidate: bOnly }; // pure disagreement
+    if (aOnly.some(isHardValue) && bOnly.some(isHardValue)) return { existing: aOnly, candidate: bOnly };
+    return null; // overlap with only soft (proper-noun) differences: cannot tell a clash from facets
   }
 
   // (b) Numeric values with the same unit and no number in common, e.g. `Postgres 16` vs `Postgres 15`.

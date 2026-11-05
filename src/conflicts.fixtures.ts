@@ -135,4 +135,107 @@ export const CASES: ConflictCase[] = [
     candidate: { id: "thru", key: "budget", updated: NEW, body: "throughput is 200 per second" },
     expect: "silent",
   },
+
+  // (g) a reused key whose differing values are BURIED UNDER INCIDENTAL OVERLAP must still flag.
+  //     The dogfood miss: both notes mention `json` and `TODO_FILE`, but one asserts a JSON file and the
+  //     other SQLite. Shared tokens used to mask it; each side's distinctive values now carry the day.
+  {
+    name: "g1: same key, json-file vs sqlite with shared `TODO_FILE`/`json` tokens -> MUST flag",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path; writes are atomic via temp+rename.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence. The DB lives at `todos.db`; the `TODO_FILE` path points to it.",
+    },
+    expect: "flag",
+    flags: "json-store",
+  },
+  // guards: the new positive condition (both sides have distinctive values) must still defer to the
+  // existing silence rules -- a subset restatement, an explicit supersede, and a reconcile all stay quiet
+  // even though `json`/`TODO_FILE` overlap and each note names something the other does not.
+  {
+    name: "g2: restatement that drops detail (B's values subset A's) under the overlap key -> silent",
+    existing: [
+      { id: "json-store", key: "storage-choice", status: "active", updated: OLD, body: "Persist todos in a single JSON file `todos.json`, tracking `nextId`." },
+    ],
+    candidate: { id: "json-restated", key: "storage-choice", updated: NEW, body: "Todos are kept in a JSON file `todos.json`." },
+    expect: "silent",
+  },
+  {
+    name: "g3: sqlite note that explicitly supersedes the json note (with overlap) -> silent",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence; the DB lives at `todos.db`, reached via the `TODO_FILE` path.\n\nSupersedes: [[json-store]]",
+    },
+    expect: "silent",
+  },
+  {
+    name: "g4: json and sqlite notes reconciled as keep-both (with overlap) -> silent",
+    existing: [
+      {
+        id: "json-store",
+        key: "storage-choice",
+        status: "active",
+        updated: OLD,
+        body: "Persist todos in a single JSON file `todos.json`. The store tracks `nextId` and the `TODO_FILE` path.",
+      },
+    ],
+    candidate: {
+      id: "sqlite-store",
+      key: "storage-choice",
+      updated: NEW,
+      body: "Use SQLite instead of a JSON file for persistence; the DB lives at `todos.db`, reached via the `TODO_FILE` path.\n\nReconciled with: [[json-store]]",
+    },
+    expect: "silent",
+  },
+  // guards for the overlap trigger's lower bound: when two notes share a value token and their only
+  // differing values are bare proper nouns (no code span, identifier, or digit), we cannot tell a clash
+  // from two complementary facets, so we stay silent. Flagging these would be the cry-wolf failure mode.
+  {
+    name: "g5: same key, shared `Postgres`, differing values are complementary facets (hosting vs pooling) -> silent",
+    existing: [{ id: "db-host", key: "db", status: "active", updated: OLD, body: "Database is Postgres, hosted on AWS." }],
+    candidate: { id: "db-pool", key: "db", updated: NEW, body: "Database is Postgres, run behind PgBouncer." },
+    expect: "silent",
+  },
+  {
+    name: "g6: same key, shared `Docker`, soft proper-noun swap (Postgres->MySQL) -> silent (intentional under-flag)",
+    // A genuine change we deliberately MISS: with only proper nouns differing under overlap it is
+    // indistinguishable from a complementary-facet note, and a miss is cheaper than a false positive.
+    // A note naming a hard value (a file/identifier/version) would still flag; see g1.
+    existing: [{ id: "store-a", key: "store", status: "active", updated: OLD, body: "Primary store is Postgres, deployed with Docker." }],
+    candidate: { id: "store-b", key: "store", updated: NEW, body: "Primary store is MySQL, deployed with Docker." },
+    expect: "silent",
+  },
+  {
+    name: "g7: same key, shared code span, each side a DISTINCT code span on orthogonal axes -> flags (accepted twin of g1)",
+    // The irreducible cost of catching g1: a hard value flags under overlap, and we cannot tell a true
+    // clash (`todos.json` vs `todos.db`) from complementary facets (a log path vs a metrics sink) without
+    // semantics. We accept the flag -- hard values are far more often THE contested value than a bare name,
+    // and the warning is advisory (silence it with Supersedes:/Reconciled with:). Pinned so a future tweak
+    // to `isHardValue` cannot shift this boundary unnoticed.
+    existing: [{ id: "svc-config-a", key: "service-config", status: "active", updated: OLD, body: "Config `config.json`; logs to `/var/log/app`." }],
+    candidate: { id: "svc-config-b", key: "service-config", updated: NEW, body: "Config `config.json`; metrics via `statsd-x`." },
+    expect: "flag",
+    flags: "svc-config-a",
+  },
 ];
