@@ -60,6 +60,17 @@ describe("search", () => {
     expect(await new SearchIndex(vault).sync()).toMatchObject({ parsed: 0 });
   });
 
+  it("survives concurrent syncs without a duplicate-id crash", async () => {
+    // Two sweeps racing on a fresh index used to both see a note as new and `mini.add` it twice,
+    // and MiniSearch throws "duplicate document ID". Refreshes must serialize.
+    const index = new SearchIndex(vault);
+    const stats = await Promise.all([index.sync(), index.sync(), index.sync(), index.search("storage")]);
+    expect(index.size).toBe(3);
+    // Exactly one sweep adds the three notes; the rest find nothing new to do.
+    expect((stats.slice(0, 3) as { added: number }[]).reduce((n, s) => n + s.added, 0)).toBe(3);
+    expect((await index.search("storage"))[0]?.id).toBe("storage-decision");
+  });
+
   it("does not re-index a touched file whose normalized content is unchanged", async () => {
     const index = new SearchIndex(vault);
     await index.sync();

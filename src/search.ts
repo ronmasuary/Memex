@@ -1,6 +1,7 @@
 import MiniSearch from "minisearch";
 import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { Queue } from "./git.js";
 import { buildBacklinks, extractWikilinks } from "./links.js";
 import { atomicWriteFile, type Note, type Vault } from "./vault.js";
 
@@ -74,6 +75,10 @@ export class SearchIndex {
   private mini = new MiniSearch(OPTIONS);
   private entries = new Map<string, Entry>();
   private loaded = false;
+  // Index refreshes mutate `mini`/`entries` across many awaits. Two concurrent sweeps could both
+  // see a note as new and `mini.add` it twice (MiniSearch then throws "duplicate document ID"), so
+  // every refresh runs strictly one-at-a-time on this chain.
+  private readonly refresh = new Queue();
 
   constructor(private readonly vault: Vault) {}
 
@@ -106,16 +111,22 @@ export class SearchIndex {
   }
 
   /** Drop the persisted index and rebuild everything from the markdown files. */
-  async rebuild(): Promise<SyncStats> {
-    await rm(this.indexFile, { force: true });
-    this.mini = new MiniSearch(OPTIONS);
-    this.entries = new Map();
-    this.loaded = true;
-    return this.sync();
+  rebuild(): Promise<SyncStats> {
+    return this.refresh.run(async () => {
+      await rm(this.indexFile, { force: true });
+      this.mini = new MiniSearch(OPTIONS);
+      this.entries = new Map();
+      this.loaded = true;
+      return this.doSync();
+    });
   }
 
   /** mtime staleness sweep: re-parse only new or changed files, forget deleted ones. No watcher. */
-  async sync(): Promise<SyncStats> {
+  sync(): Promise<SyncStats> {
+    return this.refresh.run(() => this.doSync());
+  }
+
+  private async doSync(): Promise<SyncStats> {
     await this.load();
     const stats: SyncStats = { added: 0, updated: 0, removed: 0, parsed: 0 };
     const paths = await this.vault.listNotePaths();
