@@ -21,6 +21,17 @@ function previewSlug(title: string): string {
 }
 
 /**
+ * The id-significant form of a title: its slug, or — for a title with no ASCII letters/digits — a
+ * marker of the raw text, which the server turns into a stable `note-<hash>` id. A save updates THIS
+ * note only when the new title maps to the same form as the original, so we compare *titles* and not
+ * the stored id, which may carry a disambiguating `-N` suffix the editor can't predict.
+ */
+function titleIdentity(title: string): string {
+  const slug = previewSlug(title);
+  return slug.length > 0 ? slug : `\u0000${title.trim()}`;
+}
+
+/**
  * Create / edit a note. One save = one git commit (provenance source `web/ui`). After saving, any contradiction
  * warnings returned by the server are shown inline so the writer sees the collision before leaving the editor.
  */
@@ -93,10 +104,11 @@ export function Editor({
 
   const projectOptions = [...new Set([...projects, project].filter(Boolean))].sort();
 
-  // Editing an existing note whose new title slugifies to a different id: the server would create a
-  // new note and leave the original untouched. Surface that instead of silently duplicating.
+  // Editing an existing note whose new title maps to a different id: the server would create a new
+  // note and leave the original untouched. Surface that instead of silently duplicating. Compare the
+  // title's id-significant form to the original title's (not the stored id, which may carry a `-N`).
   const newId = previewSlug(title);
-  const willFork = !!initial && newId.length > 0 && newId !== initial.note.id;
+  const willFork = !!initial && titleIdentity(title) !== titleIdentity(initial.note.title);
 
   return (
     <div className={`modal${open ? " on" : ""}`} aria-hidden={!open}>
@@ -113,7 +125,7 @@ export function Editor({
             {willFork && (
               <p className="fh" style={{ color: "var(--warn, #b45309)" }}>
                 A note's id comes from its title and can't be renamed. Saving this title creates a <b>new</b> note
-                (<code className="mono">{newId}</code>) and leaves <code className="mono">{initial!.note.id}</code> as it was.
+                {newId ? <> (<code className="mono">{newId}</code>)</> : null} and leaves <code className="mono">{initial!.note.id}</code> as it was.
               </p>
             )}
           </div>
