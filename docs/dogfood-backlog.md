@@ -21,6 +21,13 @@ these are UX and eval improvements.
 - [ ] **Exercise the contradiction warning in the dogfood/eval.** A naive single build uses
   distinct keys and never trips it. Add a step that deliberately reuses a `key` with a new
   value and asserts the WARNING fires.
+- [ ] **The detector may be too hard to trip in practice.** In the cold second session, an
+  agent wrote a note with the existing `key: storage-choice` and a different value (SQLite),
+  explicitly saying "Conflicts with [[adr-0002]]" — and NO warning fired, because the note
+  also mentioned "JSON" (shared token) and was framed as an unimplemented *proposal*. This is
+  defensible under-flagging, but it means the headline feature is hard to surface naturally.
+  Decide: treat a reused `key` with a clearly different asserted value more assertively, or at
+  least document how to phrase a note so a real contradiction is caught.
 
 ## Insight
 
