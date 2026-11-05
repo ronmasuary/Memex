@@ -208,4 +208,22 @@ export const CASES: ConflictCase[] = [
     },
     expect: "silent",
   },
+  // guards for the overlap trigger's lower bound: when two notes share a value token and their only
+  // differing values are bare proper nouns (no code span, identifier, or digit), we cannot tell a clash
+  // from two complementary facets, so we stay silent. Flagging these would be the cry-wolf failure mode.
+  {
+    name: "g5: same key, shared `Postgres`, differing values are complementary facets (hosting vs pooling) -> silent",
+    existing: [{ id: "db-host", key: "db", status: "active", updated: OLD, body: "Database is Postgres, hosted on AWS." }],
+    candidate: { id: "db-pool", key: "db", updated: NEW, body: "Database is Postgres, run behind PgBouncer." },
+    expect: "silent",
+  },
+  {
+    name: "g6: same key, shared `Docker`, soft proper-noun swap (Postgres->MySQL) -> silent (intentional under-flag)",
+    // A genuine change we deliberately MISS: with only proper nouns differing under overlap it is
+    // indistinguishable from a complementary-facet note, and a miss is cheaper than a false positive.
+    // A note naming a hard value (a file/identifier/version) would still flag; see g1.
+    existing: [{ id: "store-a", key: "store", status: "active", updated: OLD, body: "Primary store is Postgres, deployed with Docker." }],
+    candidate: { id: "store-b", key: "store", updated: NEW, body: "Primary store is MySQL, deployed with Docker." },
+    expect: "silent",
+  },
 ];

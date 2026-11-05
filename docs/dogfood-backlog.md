@@ -26,15 +26,19 @@ these are UX and eval improvements.
   explicitly saying "Conflicts with [[adr-0002]]" — and NO warning fired, because the note
   also mentioned "JSON" (shared token) and was framed as an unimplemented *proposal*. This is
   defensible under-flagging, but it means the headline feature is hard to surface naturally.
-  **Fixed (surgical).** `differingValues` rule (a) in `src/conflicts.ts` no longer grants
-  blanket immunity on *any* shared value token. It now compares each side's **distinctive**
-  values (those the other side lacks): it flags only when **both** sides assert at least one
-  distinctive value, so incidental overlap (`json`, `TODO_FILE`) can't mask a real
-  JSON-file-vs-SQLite contradiction. A note whose values are a *subset* of the other's
-  (a restatement or a refinement) still has no distinctive value, so it stays silent — as do
-  explicit `Supersedes:`/`Reconciled with:` pairs, which are short-circuited upstream. New
-  fixtures `g1` (the positive) and `g2`–`g4` (restatement/supersede/reconcile guards, all
-  silent despite overlap) lock this in.
+  **Fixed (surgical).** `differingValues` rule (a) in `src/conflicts.ts` no longer grants blanket
+  immunity on *any* shared value token. It compares each side's **distinctive** values (those the
+  other side lacks): a subset (restatement/refinement) stays silent; with **no** shared token the
+  notes plainly disagree and any distinctive value flags (unchanged no-overlap behaviour). When the
+  notes **do** share a token, it flags only if each side's distinctive set carries a **hard** value
+  — a `code span`, a dotted/underscored identifier, or a token with a digit (what a real contested
+  value looks like: a filename, path, key, version). So the JSON-file-vs-SQLite miss (`todos.json`
+  vs `todos.db` under shared `json`/`TODO_FILE`) now flags, while a bare proper-noun difference under
+  overlap (`Postgres, on AWS` vs `Postgres, via PgBouncer`) stays silent — those are as likely
+  complementary facets as a clash, and crying wolf is the fatal mode. Explicit `Supersedes:`/
+  `Reconciled with:` pairs are short-circuited upstream regardless. New fixtures: `g1` (positive,
+  hard values flag), `g2`–`g4` (restatement/supersede/reconcile guards), `g5`–`g6` (soft-overlap
+  boundary: complementary facets and a deliberately-missed proper-noun swap, both silent).
 
 ## Insight
 
