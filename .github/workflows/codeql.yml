@@ -1,5 +1,8 @@
 name: CodeQL
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, beta]
@@ -15,6 +18,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: github/codeql-action/init@v3
         with:

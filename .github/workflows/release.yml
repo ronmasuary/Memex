@@ -11,6 +11,7 @@ name: Release
 #                        and secret NPM_TOKEN exists (it does not today). Memex is a private repo and
 #                        is not published to npm; the owner decides when/if that changes.
 #
+# (A dispatch run started FROM a tag ref is treated like a dry run too: Release/publish require a real tag push.)
 # Tagging, publishing and making the repo public are the owner's manual decisions.
 
 on:
@@ -33,6 +34,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -43,7 +46,7 @@ jobs:
             web/package-lock.json
 
       - name: Check tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -56,7 +59,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          npm --prefix web ci
+          npm --prefix web ci --ignore-scripts
 
       - name: Typecheck, lint, test
         run: |
@@ -92,7 +95,7 @@ jobs:
     name: GitHub Release
     needs: build
     # Tag pushes only — a manual dispatch never creates a Release.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -114,7 +117,7 @@ jobs:
     needs: build
     # Triple gate: tag run + explicit repo variable opt-in + a token must exist.
     # Today none of the opt-ins exist, so this job is always skipped.
-    if: startsWith(github.ref, 'refs/tags/v') && vars.NPM_PUBLISH_ENABLED == 'true'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.NPM_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm-publish # create this environment with required reviewers before enabling
@@ -123,6 +126,8 @@ jobs:
       id-token: write # for npm provenance
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -139,7 +144,7 @@ jobs:
             exit 1
           fi
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - run: npm run build
 
@@ -149,6 +154,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm --prefix web ci
+          npm --prefix web ci --ignore-scripts
           npm run build:web
-          npm publish --provenance --access public
+          npm publish  # add --provenance only if the repo is public
