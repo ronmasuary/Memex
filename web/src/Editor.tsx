@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { writeNote, type ContradictionWarning, type NoteDetail } from "./api";
 import { Icon } from "./icons";
+import { useDialog } from "./useDialog";
 
 const MAX_SLUG_LENGTH = 60;
 
@@ -55,6 +56,7 @@ export function Editor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const titleRef = useRef<HTMLInputElement>(null);
+  const sheetRef = useDialog<HTMLDivElement>(open);
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
 
@@ -112,7 +114,7 @@ export function Editor({
 
   return (
     <div className={`modal${open ? " on" : ""}`} aria-hidden={!open}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={initial ? "Edit note" : "New note"}>
+      <div ref={sheetRef} className="sheet" role="dialog" aria-modal="true" tabIndex={-1} aria-label={initial ? "Edit note" : "New note"}>
         <div className="shead">
           <Icon name="pencil" style={{ color: "var(--accent)" }} />
           <h2 style={{ fontSize: 16 }}>{initial ? "Edit note" : "New note"}</h2>

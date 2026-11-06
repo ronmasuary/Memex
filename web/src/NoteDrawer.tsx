@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { fetchNote, type NoteDetail } from "./api";
 import { Icon } from "./icons";
+import { useDialog } from "./useDialog";
 
 const swatchStyle = (c?: string): React.CSSProperties => ({ background: c });
 
@@ -37,6 +38,7 @@ export function NoteDrawer({
 
   const open = id != null;
   const note = detail?.note;
+  const drawerRef = useDialog<HTMLElement>(open);
 
   const onBodyClick = (e: MouseEvent<HTMLElement>) => {
     const a = (e.target as HTMLElement).closest("a");
@@ -52,7 +54,10 @@ export function NoteDrawer({
   return (
     <>
       <div className={`scrim${open ? " on" : ""}`} onClick={onClose} />
-      <aside className={`drawer${open ? " on" : ""}`} aria-label="Note" aria-hidden={!open}>
+      <aside
+        ref={drawerRef} className={`drawer${open ? " on" : ""}`} role="dialog" aria-modal="true"
+        aria-label="Note" aria-hidden={!open} tabIndex={-1}
+      >
         <div className="dhead">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="crumb">
