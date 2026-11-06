@@ -171,7 +171,7 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
           el.setAttribute("stroke", CONFLICT_COLOR);
           el.setAttribute("stroke-width", seld ? "3.4" : "2.6");
         } else {
-          el.setAttribute("stroke", seld ? "var(--fg)" : "rgba(255,255,255,.5)");
+          el.setAttribute("stroke", seld ? "#e7e9f0" : "rgba(255,255,255,.5)");
           el.setAttribute("stroke-width", seld ? "2.4" : "1");
         }
       }
@@ -229,7 +229,9 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
         L.pill.setAttribute("stroke", seld ? pc : "transparent");
         L.pill.setAttribute("stroke-width", seld ? "1.2" : "0");
         L.text.setAttribute("x", String(lx)); L.text.setAttribute("y", String(ly + 0.5));
-        L.text.setAttribute("fill", seld ? "var(--fg)" : "#e7e9f0");
+        // Literal (not var(--fg)): the canvas is always dark, and CSS vars are unreliable in SVG
+        // presentation attributes — keep selected labels explicitly legible on the dark canvas.
+        L.text.setAttribute("fill", "#e7e9f0");
         L.text.setAttribute("font-weight", seld ? "700" : "600");
         if (Math.abs(ly - py) > rr + 3) {
           L.lead.style.display = "";

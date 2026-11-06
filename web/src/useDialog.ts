@@ -26,7 +26,8 @@ export function useDialog<T extends HTMLElement>(open: boolean) {
     if (!open) return;
 
     restore.current = document.activeElement as HTMLElement | null;
-    const focusables = () => [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+    // getClientRects (not offsetParent) so visibility is detected even for position:fixed children.
+    const focusables = () => [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.getClientRects().length > 0);
     // Move focus into the dialog (first focusable, else the container itself — it carries tabindex=-1).
     (focusables()[0] ?? el).focus();
 
@@ -35,9 +36,11 @@ export function useDialog<T extends HTMLElement>(open: boolean) {
       const items = focusables();
       if (items.length === 0) { e.preventDefault(); el.focus(); return; }
       const first = items[0]!, last = items[items.length - 1]!;
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !el.contains(active))) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && (active === last || !el.contains(active))) { e.preventDefault(); first.focus(); }
+      // index -1 means focus is on the container (or otherwise outside the focusable list) — treat it
+      // as "before the first" so Tab/Shift+Tab both stay inside the trap.
+      const idx = items.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && idx <= 0) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (idx === -1 || idx === items.length - 1)) { e.preventDefault(); first.focus(); }
     };
     el.addEventListener("keydown", onKey);
     return () => {
