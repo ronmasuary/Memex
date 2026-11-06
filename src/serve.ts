@@ -134,23 +134,33 @@ function writeGate(req: http.IncomingMessage): string | null {
   return null;
 }
 
-async function readJson(req: http.IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) {
-      // Stop reading and tear down the connection so an oversize upload can't keep streaming into memory.
-      req.destroy();
-      throw new HttpError(413, "request body too large");
-    }
-    chunks.push(chunk as Buffer);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-  } catch {
-    throw new HttpError(400, "body is not valid JSON");
-  }
+function readJson(req: http.IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    req.on("data", (chunk: Buffer) => {
+      if (over) return; // past the cap: keep draining but stop buffering (memory stays bounded)
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        over = true;
+        chunks.length = 0; // release what we buffered
+        return;
+      }
+      chunks.push(chunk);
+    });
+    // Let the request finish streaming before responding (rather than throwing out of a read, which
+    // destroys the socket and resets the connection before the 413 can be delivered).
+    req.on("end", () => {
+      if (over) return reject(new HttpError(413, "request body too large"));
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+      } catch {
+        reject(new HttpError(400, "body is not valid JSON"));
+      }
+    });
+    req.on("error", reject);
+  });
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
