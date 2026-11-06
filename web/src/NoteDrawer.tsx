@@ -95,6 +95,9 @@ export function NoteDrawer({
               {note.status === "archived" && (
                 <div className="noticebar neutral"><Icon name="archive" />Archived. Memex never hard-deletes — this note is still in git history and can be restored.</div>
               )}
+              {/* `detail.html` is produced by the server's markdown-it renderer configured with
+                  `html: false` (see createRenderer in src/serve.ts), so raw HTML in a note body is
+                  escaped, not passed through — the only tags are the renderer's own. Safe to inject. */}
               <div className="md" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: detail.html }} />
               <div className="backlinks">
                 <h4>Backlinks ({detail.backlinks.length})</h4>

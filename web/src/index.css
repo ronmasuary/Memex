@@ -2,9 +2,9 @@
 
 /* ── Memex: "quiet observatory" ──────────────────────────────────────────
    Near-monochrome slate surfaces, ONE azure accent for UI chrome; the only
-   saturated color is each project's hue. Dark-first with full light support;
-   the graph canvas stays dark in both themes. Inter (UI) + JetBrains Mono
-   (ids/keys/commits). Hairline borders, soft shadows, frosted-glass overlays. */
+   saturated color is each project's hue. Dark-only (the single base theme on
+   :root). Inter (UI) + JetBrains Mono (ids/keys/commits). Hairline borders,
+   soft shadows, frosted-glass overlays. */
 :root {
   color-scheme: dark;
   --bg: #0b0d13; --panel: #12141d; --panel-2: #171a25; --elev: #1b1f2b;
@@ -19,32 +19,11 @@
   --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
-    --bg: #eef1f6; --panel: #fff; --panel-2: #f6f8fc; --elev: #fff;
-    --border: rgba(17, 22, 34, .11); --border-strong: rgba(17, 22, 34, .18);
-    --fg: #181c27; --fg-dim: #565d70; --fg-faint: #8b92a4;
-    --accent: #3b6fe0; --accent-soft: rgba(59, 111, 224, .12); --accent-fg: #fff;
-    --shadow: 0 1px 2px rgba(17, 22, 34, .08), 0 14px 36px rgba(17, 22, 34, .12);
-    --shadow-sm: 0 1px 2px rgba(17, 22, 34, .08);
-  }
-}
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #eef1f6; --panel: #fff; --panel-2: #f6f8fc; --elev: #fff;
-  --border: rgba(17, 22, 34, .11); --border-strong: rgba(17, 22, 34, .18);
-  --fg: #181c27; --fg-dim: #565d70; --fg-faint: #8b92a4;
-  --accent: #3b6fe0; --accent-soft: rgba(59, 111, 224, .12); --accent-fg: #fff;
-  --shadow: 0 1px 2px rgba(17, 22, 34, .08), 0 14px 36px rgba(17, 22, 34, .12);
-  --shadow-sm: 0 1px 2px rgba(17, 22, 34, .08);
-}
-:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
-  margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+  margin: 0; background: #0b0d13; color: var(--fg); font-family: var(--sans);
   font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3 { margin: 0; font-weight: 600; }
@@ -135,13 +114,17 @@ main { padding-top: 22px; padding-bottom: 40px; }
 .ov { position: absolute; background: color-mix(in srgb, var(--panel) 82%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); }
-.zoom { bottom: 14px; right: 14px; display: flex; flex-direction: column; overflow: hidden; }
+/* Zoom/fit rail: anchored inside the canvas padding, bottom-right, and kept ABOVE the selection tray
+   so its buttons are never occluded (the tray renders later in the DOM). */
+.zoom { bottom: 14px; right: 14px; z-index: 2; display: flex; flex-direction: column; overflow: hidden; }
 .zoom button { width: 38px; height: 36px; display: grid; place-items: center; color: var(--fg-dim); }
 .zoom button + button { border-top: 1px solid var(--border); }
 .zoom button:hover { background: var(--elev); color: var(--fg); }
 .readout { top: 14px; right: 14px; padding: 7px 11px; font-size: 11.5px; color: var(--fg-dim); display: flex; gap: 12px; }
 .readout b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
-.tray { left: 50%; transform: translateX(-50%); bottom: 14px; max-width: min(560px, calc(100% - 92px));
+/* Centered, but its width reserves room on each side so it never slides under the bottom-right zoom
+   rail (~68px) — the buttons stay fully visible at every stage width. Pills scroll inside if needed. */
+.tray { left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 1; max-width: min(520px, calc(100% - 148px));
   padding: 9px 11px; display: flex; align-items: center; gap: 10px; }
 .tray .pills { display: flex; gap: 6px; overflow-x: auto; min-width: 0; }
 .tray .selpill { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--border);

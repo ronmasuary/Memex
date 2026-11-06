@@ -1,6 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { resolveConflict, type ConflictPair, type ConflictSide, type ConflictsData, type ResolveAction } from "./api";
 import { Icon } from "./icons";
+
+/**
+ * A compact plain-text preview of a note body for the side-by-side view: drop `**bold**` markers and
+ * flatten `[[wikilinks]]` to their label. The result is rendered as a React text node (never as HTML),
+ * so it is XSS-safe by construction — the counterpart to the drawer, which renders the server's
+ * already-sanitized HTML. Neither path ever injects an unsanitized string.
+ */
+function toPlainText(body: string): string {
+  return body.replace(/\*\*/g, "").replace(/\[\[([a-z0-9-]+)(?:\|([^\]]+))?\]\]/g, (_m, id, lbl) => lbl || id);
+}
 
 function provLine(p: ConflictSide["provenance"]): string {
   return [
@@ -21,7 +31,7 @@ function Side({
     <div className="side">
       <div className="lbl"><span>{label}</span>{flag && <span className="flag">{flag}</span>}</div>
       <div className="sttl"><button onClick={() => onOpenNote(side.id)}>{side.title}</button></div>
-      <div className="cbody">{side.body.replace(/\*\*/g, "").replace(/\[\[([a-z0-9-]+)(?:\|([^\]]+))?\]\]/g, (_m, id, lbl) => lbl || id)}</div>
+      <div className="cbody">{toPlainText(side.body)}</div>
       <div className="asserts">
         <span style={{ color: "var(--fg-faint)" }}>asserts </span>
         {values.length === 0
@@ -51,6 +61,9 @@ function Pair({
     try {
       const r = await resolveConflict(pair.a.id, pair.b.id, action, note);
       const what = action === "keep_both" ? "Kept both" : `Kept ${r.kept}`;
+      // Re-enable before handing control back: the refresh usually removes this pair, but if it stays
+      // (detection still sees a contradiction), the buttons must not be stuck disabled.
+      setBusy(false);
       onResolved(`${what}${r.commit ? ` · commit ${r.commit.slice(0, 7)}` : ""}`);
     } catch (e) {
       setError((e as Error).message);
@@ -97,13 +110,21 @@ export function ConflictsView({
 }: {
   data: ConflictsData; color: Map<string, string>; onResolved: () => void; onOpenNote: (id: string) => void;
 }) {
-  const [done, setDone] = useState<string>();
+  const [done, setDone] = useState<{ msg: string; id: number }>();
+
+  // The "Resolved" banner is transient confirmation, not a sticky state: clear it after a few seconds
+  // so it doesn't linger over the (now refreshed) inbox.
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setDone(undefined), 4000);
+    return () => clearTimeout(t);
+  }, [done]);
 
   return (
     <div className="view">
       {done && (
         <div className="banner good" role="status">
-          <Icon name="archive" />Resolved. {done}
+          <Icon name="archive" />Resolved. {done.msg}
         </div>
       )}
       <div className="conflist">
@@ -112,7 +133,7 @@ export function ConflictsView({
         )}
         {data.conflicts.map((pair) => (
           <Pair key={pair.id} pair={pair} color={color} onOpenNote={onOpenNote}
-            onResolved={(msg) => { setDone(msg); onResolved(); }} />
+            onResolved={(msg) => { setDone({ msg, id: Date.now() }); onResolved(); }} />
         ))}
         {data.flagged.length > 0 && (
           <section className="card conflict">

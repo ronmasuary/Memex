@@ -41,29 +41,26 @@ export function App() {
     lastTab.current = tab;
   }
 
-  // theme
-  const [theme, setTheme] = useState<string>(() => document.documentElement.getAttribute("data-theme") ?? "");
-  const toggleTheme = () => {
-    const cur = theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    const next = cur === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    try { localStorage.setItem("memex-theme", next); } catch { /* private mode */ }
-    setTheme(next);
-  };
-
   // data (refetched on `rev`); previous data is kept visible while a refresh is in flight.
   const [rev, setRev] = useState(0);
   const refresh = useCallback(() => setRev((r) => r + 1), []);
   const [notes, setNotes] = useState<NoteSummary[]>();
   const [graph, setGraph] = useState<GraphData>();
   const [conflicts, setConflicts] = useState<ConflictsData>();
-  const [loadError, setLoadError] = useState<string>();
+  // Per-tab load errors: the three fetches are independent, so one failing (e.g. the graph) must not
+  // blank the other tabs. On a refresh, a now-failing fetch keeps its last-good data on screen.
+  const [errors, setErrors] = useState<{ notes?: string; graph?: string; conflicts?: string }>({});
   useEffect(() => {
     let live = true;
-    Promise.all([fetchNotes(), fetchGraph(), fetchConflicts()]).then(
-      ([n, g, c]) => { if (!live) return; setNotes(n.notes); setGraph(g); setConflicts(c); setLoadError(undefined); },
-      (e: Error) => { if (live) setLoadError(e.message); },
-    );
+    const reason = (r: unknown) => (r instanceof Error ? r.message : String(r));
+    Promise.allSettled([fetchNotes(), fetchGraph(), fetchConflicts()]).then(([n, g, c]) => {
+      if (!live) return;
+      const next: { notes?: string; graph?: string; conflicts?: string } = {};
+      if (n.status === "fulfilled") setNotes(n.value.notes); else next.notes = reason(n.reason);
+      if (g.status === "fulfilled") setGraph(g.value); else next.graph = reason(g.reason);
+      if (c.status === "fulfilled") setConflicts(c.value); else next.conflicts = reason(c.reason);
+      setErrors(next);
+    });
     return () => { live = false; };
   }, [rev]);
 
@@ -142,23 +139,24 @@ export function App() {
               <kbd>⌘K</kbd>
             </div>
             <button className="btn primary" onClick={openNew}><Icon name="plus" /><span className="lbl-txt">New note</span></button>
-            <button className="icon-btn" title="Toggle theme" aria-label="Toggle theme" onClick={toggleTheme}><Icon name="moon" /></button>
           </div>
         </div>
       </header>
 
       <main className="gutter">
-        {loadError && <div className="view"><p className="banner err">Could not load the vault: {loadError}</p></div>}
-
         {tab === "graph" && (
           <section className="view">
-            {graph ? <Graph data={graph} onOpen={openNote} /> : <p className="loading view">Loading…</p>}
+            {graph
+              ? <Graph data={graph} onOpen={openNote} />
+              : errors.graph
+                ? <p className="banner err">Could not load the graph: {errors.graph}</p>
+                : <p className="loading view">Loading…</p>}
           </section>
         )}
 
         {tab === "notes" && (
           <NotesView
-            notes={notes} color={color} query={query} setQuery={setQuery}
+            notes={notes} error={errors.notes} color={color} query={query} setQuery={setQuery}
             onOpen={openNote} onEdit={openEditId} onArchive={doArchive} onRestore={doRestore} onNew={openNew}
           />
         )}
@@ -166,7 +164,9 @@ export function App() {
         {tab === "conflicts" && (
           conflicts
             ? <ConflictsView data={conflicts} color={color} onResolved={refresh} onOpenNote={openNote} />
-            : <p className="loading view">Loading…</p>
+            : errors.conflicts
+              ? <div className="view"><p className="banner err">Could not load conflicts: {errors.conflicts}</p></div>
+              : <p className="loading view">Loading…</p>
         )}
       </main>
 
@@ -184,9 +184,10 @@ export function App() {
 }
 
 function NotesView({
-  notes, color, query, setQuery, onOpen, onEdit, onArchive, onRestore, onNew,
+  notes, error, color, query, setQuery, onOpen, onEdit, onArchive, onRestore, onNew,
 }: {
   notes: NoteSummary[] | undefined;
+  error?: string;
   color: Map<string, string>;
   query: string;
   setQuery: (v: string) => void;
@@ -228,12 +229,17 @@ function NotesView({
         <button className="btn primary" onClick={onNew}><Icon name="plus" />New note</button>
       </div>
 
-      {!notes && <p className="loading">Loading…</p>}
+      {!notes && error && <p className="banner err">Could not load notes: {error}</p>}
+      {!notes && !error && <p className="loading">Loading…</p>}
       {notes && groups.length === 0 && (
         <p className="empty">
           {showArchived
             ? "No archived notes. Archiving keeps a note in git history; nothing is ever hard-deleted."
-            : notes.some((n) => n.status !== "archived") ? "No notes match." : "This vault has no notes yet."}
+            : query.trim()
+              ? "No notes match."
+              : notes.length === 0
+                ? "This vault has no notes yet."
+                : "Every note here is archived. Toggle “Show archived” to see them."}
         </p>
       )}
 

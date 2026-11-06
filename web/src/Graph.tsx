@@ -28,6 +28,23 @@ const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
+ * The single fit calculation: the transform that frames `nodes` (with a fixed screen-space padding)
+ * inside a `W`×`H` stage, clamped to a sane zoom range. Returns null when there is nothing to frame.
+ * Shared by the initial layout and the fit-to-view button so the two can never drift apart.
+ */
+function computeFit(nodes: SimNode[], W: number, H: number): { k: number; tx: number; ty: number } | null {
+  if (!nodes.length) return null;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const n of nodes) {
+    x0 = Math.min(x0, (n.x ?? 0) - n.r); y0 = Math.min(y0, (n.y ?? 0) - n.r);
+    x1 = Math.max(x1, (n.x ?? 0) + n.r); y1 = Math.max(y1, (n.y ?? 0) + n.r);
+  }
+  const pad = 70, gw = Math.max(1, x1 - x0), gh = Math.max(1, y1 - y0);
+  const k = Math.max(0.4, Math.min(2.4, Math.min((W - pad * 2) / gw, (H - pad * 2) / gh)));
+  return { k, tx: W / 2 - k * (x0 + gw / 2), ty: H / 2 - k * (y0 + gh / 2) };
+}
+
+/**
  * The graph is the centerpiece. d3-force owns the physics; React owns the DOM and the control rail. Positions
  * and per-node styling are written straight to the SVG on each tick (no React re-render per frame). Zoom/pan is a
  * transform on the node + edge groups; labels live in an untransformed group so they stay a constant screen size
@@ -109,6 +126,9 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
     const map = new Map(sn.map((n) => [n.id, n]));
     simNodes.current = map;
     const links: SimLink[] = edges.map((e) => ({ source: e.source, target: e.target, proj: byId.get(e.source)?.project ?? "" }));
+    // Edge <line> refs are stored by index; a smaller graph than a previous one would otherwise leave
+    // stale trailing entries in the array forever. Drop them so `lineEls` tracks the current edges.
+    lineEls.current.length = links.length;
 
     const sp = spacingRef.current;
     const sim = forceSimulation<SimNode>(sn)
@@ -183,13 +203,20 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
         L.text.textContent = txt;
         boxes.push({ n, px, py, w: txt.length * 6.9 + 16, h: 20, rr: n.r * k, lx: px + n.r * k + 9, ly: py });
       }
-      boxes.sort((a, b) => a.ly - b.ly);
+      // Push overlapping labels apart vertically. Sorting by x lets the inner scan STOP at the first
+      // label that starts past the current one's right edge: with the list x-sorted, nothing further
+      // right can overlap either. Labels only collide with their x-neighbours, so this stays
+      // near-linear per tick (the old all-pairs scan was O(n²) every frame, costly in "all" mode).
+      boxes.sort((a, b) => a.lx - b.lx);
       for (let pass = 0; pass < 6; pass++) {
-        for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-          const a = boxes[i]!, b = boxes[j]!;
-          if (b.lx > a.lx + a.w + 6 || a.lx > b.lx + b.w + 6) continue;
-          const dy = b.ly - a.ly, min = (a.h + b.h) / 2 + 3;
-          if (Math.abs(dy) < min) { const shift = ((min - Math.abs(dy)) / 2) * (dy >= 0 ? 1 : -1); a.ly -= shift; b.ly += shift; }
+        for (let i = 0; i < boxes.length; i++) {
+          const a = boxes[i]!;
+          for (let j = i + 1; j < boxes.length; j++) {
+            const b = boxes[j]!;
+            if (b.lx > a.lx + a.w + 6) break; // x-sorted: no later label can overlap `a`
+            const dy = b.ly - a.ly, min = (a.h + b.h) / 2 + 3;
+            if (Math.abs(dy) < min) { const shift = ((min - Math.abs(dy)) / 2) * (dy >= 0 ? 1 : -1); a.ly -= shift; b.ly += shift; }
+          }
         }
       }
       for (const { n, px, py, w, h, rr, lx, ly } of boxes) {
@@ -214,22 +241,12 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
     };
     paintRef.current = paint;
 
-    const fit = () => {
-      if (!sn.length) return;
-      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-      for (const n of sn) { x0 = Math.min(x0, (n.x ?? 0) - n.r); y0 = Math.min(y0, (n.y ?? 0) - n.r); x1 = Math.max(x1, (n.x ?? 0) + n.r); y1 = Math.max(y1, (n.y ?? 0) + n.r); }
-      const pad = 70, gw = Math.max(1, x1 - x0), gh = Math.max(1, y1 - y0);
-      const k = Math.max(0.4, Math.min(2.4, Math.min((W - pad * 2) / gw, (H - pad * 2) / gh)));
-      T.current = { k, tx: W / 2 - k * (x0 + gw / 2), ty: H / 2 - k * (y0 + gh / 2) };
-      applyTransform();
-    };
-
     sim.stop();
     const warm = lastPos.current.size ? 60 : 250;
     for (let i = 0; i < warm; i++) sim.tick();
     for (const n of sn) if (n.x != null && n.y != null) lastPos.current.set(n.id, { x: n.x, y: n.y });
     applyTransform();
-    fit();
+    fitNow(); // frame the warmed-up layout (shares the fit math with the fit-to-view button)
     paint();
 
     if (!reducedMotion()) {
@@ -521,20 +538,15 @@ export function Graph({ data, onOpen }: { data: GraphData; onOpen: (id: string) 
     </div>
   );
 
-  // Fit the current layout into view (used by the fit button). Reads live positions from simNodes.
+  // Fit the current layout into view (used at init and by the fit button). Reads live positions from simNodes.
   function fitNow() {
-    const sn = [...simNodes.current.values()];
-    if (!sn.length) return;
-    const { w: W, h: H } = size.current;
-    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-    for (const n of sn) { x0 = Math.min(x0, (n.x ?? 0) - n.r); y0 = Math.min(y0, (n.y ?? 0) - n.r); x1 = Math.max(x1, (n.x ?? 0) + n.r); y1 = Math.max(y1, (n.y ?? 0) + n.r); }
-    const pad = 70, gw = Math.max(1, x1 - x0), gh = Math.max(1, y1 - y0);
-    const k = Math.max(0.4, Math.min(2.4, Math.min((W - pad * 2) / gw, (H - pad * 2) / gh)));
-    T.current = { k, tx: W / 2 - k * (x0 + gw / 2), ty: H / 2 - k * (y0 + gh / 2) };
-    const tr = `translate(${T.current.tx} ${T.current.ty}) scale(${k})`;
+    const fitted = computeFit([...simNodes.current.values()], size.current.w, size.current.h);
+    if (!fitted) return;
+    T.current = fitted;
+    const tr = `translate(${fitted.tx} ${fitted.ty}) scale(${fitted.k})`;
     edgesGRef.current?.setAttribute("transform", tr);
     nodesGRef.current?.setAttribute("transform", tr);
-    setZoomPct(Math.round(k * 100));
+    setZoomPct(Math.round(fitted.k * 100));
     paintRef.current();
   }
 }
