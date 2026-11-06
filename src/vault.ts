@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gitFor, Queue, type CommitAuthor } from "./git.js";
-import { findConflictPairs, type ConflictNote } from "./conflicts.js";
+import { findConflictPairs, toConflictNote } from "./conflicts.js";
 import { assertSafeFilename, makeSlug, slugify, uniqueSlug } from "./slug.js";
 
 export const DEFAULT_PROJECT = "general";
@@ -78,6 +78,11 @@ export interface WriteResult {
   revived: boolean;
   /** SHA of the provenance commit; null when the vault is not a git repo or `commit: false`. */
   commit: string | null;
+  /**
+   * Every OTHER note in the vault at write time (the whole vault was already read to resolve the id),
+   * so a caller can run contradiction detection against the saved note without re-scanning the vault.
+   */
+  others: Note[];
 }
 
 /** Strip a BOM and convert CRLF / lone CR to LF. All parsing and hashing works on this form. */
@@ -164,21 +169,22 @@ export function serializeNote(note: Omit<Note, "path" | "hash">): string {
   return normalizeText(matter.stringify(`${note.body.trim()}\n`, data));
 }
 
-export function commitMessage(id: string, created: boolean, prov: Provenance): string {
-  const lines = [`memex: ${created ? "add" : "update"} ${id}`, "", `note: ${id}`];
+/** The trailing `why? / source / session?` provenance lines shared by every Memex commit message. */
+function provenanceFooter(prov: Provenance): string[] {
+  const lines: string[] = [];
   if (prov.why) lines.push(`why: ${prov.why}`);
   lines.push(`source: ${prov.source}`);
   if (prov.session) lines.push(`session: ${prov.session}`);
-  return lines.join("\n");
+  return lines;
+}
+
+export function commitMessage(id: string, created: boolean, prov: Provenance): string {
+  return [`memex: ${created ? "add" : "update"} ${id}`, "", `note: ${id}`, ...provenanceFooter(prov)].join("\n");
 }
 
 /** Commit subject/body for a status flip (archive / restore) that keeps the note and its history intact. */
 function statusCommitMessage(verb: "archive" | "restore", id: string, prov: Provenance): string {
-  const lines = [`memex: ${verb} ${id}`, "", `note: ${id}`];
-  if (prov.why) lines.push(`why: ${prov.why}`);
-  lines.push(`source: ${prov.source}`);
-  if (prov.session) lines.push(`session: ${prov.session}`);
-  return lines.join("\n");
+  return [`memex: ${verb} ${id}`, "", `note: ${id}`, ...provenanceFooter(prov)].join("\n");
 }
 
 function safeSlug(title: string): string | undefined {
@@ -288,7 +294,10 @@ export class Vault {
       const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
       sha = await gitFor(this.root).commit([relPath], commitMessage(id, !previous, prov), author);
     }
-    return { note: saved, created: !previous, revived: reviving, commit: sha };
+    // Reuse the vault read above: hand back the other notes (unchanged by this write) so the caller
+    // can detect contradictions against `saved` without a second full scan of the vault.
+    const others = [...existing.values()].filter((n) => n.id !== id);
+    return { note: saved, created: !previous, revived: reviving, commit: sha, others };
   }
 
   /**
@@ -336,7 +345,8 @@ export class Vault {
       const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
       sha = await gitFor(this.root).commit([relPath], statusCommitMessage(archive ? "archive" : "restore", id, prov), author);
     }
-    return { note: saved, created: false, revived: false, commit: sha };
+    // Archive/restore only flips status; contradiction detection does not apply, so no sibling notes.
+    return { note: saved, created: false, revived: false, commit: sha, others: [] };
   }
 
   /**
@@ -360,7 +370,6 @@ export class Vault {
     const b = all.find((n) => n.id === bId);
     if (!a) throw new Error(`no note with id "${aId}"`);
     if (!b) throw new Error(`no note with id "${bId}"`);
-    const toConflictNote = (n: Note): ConflictNote => ({ id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated });
     const inConflict = findConflictPairs(all.map(toConflictNote)).some(
       (p) => (p.a.id === aId && p.b.id === bId) || (p.a.id === bId && p.b.id === aId),
     );
@@ -410,10 +419,8 @@ ${note!.trim()}`,
         `memex: resolve conflict ${a.id} / ${b.id} (${action.replace("_", " ")})`,
         "",
         `notes: ${files.map((f) => path.posix.basename(f, ".md")).join(", ")}`,
+        ...provenanceFooter(prov),
       ];
-      if (prov.why) lines.push(`why: ${prov.why}`);
-      lines.push(`source: ${prov.source}`);
-      if (prov.session) lines.push(`session: ${prov.session}`);
       const author = { name: prov.source, email: `${slugify(prov.source) || "agent"}@memex.local` };
       sha = await gitFor(this.root).commit(files, lines.join("\n"), author);
     }

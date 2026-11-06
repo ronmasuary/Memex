@@ -31,6 +31,19 @@ export interface ConflictNote {
   supersedes?: string[];
 }
 
+/** Project a vault `Note` (or anything shaped like one) down to the fields the detector reads. */
+export function toConflictNote(n: {
+  id: string;
+  title?: string;
+  key?: string;
+  project?: string;
+  status?: string;
+  body: string;
+  updated: string;
+}): ConflictNote {
+  return { id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated };
+}
+
 export interface ConflictWarning {
   /** The existing note the candidate may contradict. */
   id: string;

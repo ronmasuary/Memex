@@ -44,7 +44,7 @@ export interface SyncStats {
   added: number;
   updated: number;
   removed: number;
-  /** Files actually re-parsed (mtime/size changed). */
+  /** Files re-parsed into or out of the index (new, content-changed, or stat-moved but identical). */
   parsed: number;
 }
 
@@ -135,25 +135,32 @@ export class SearchIndex {
     for (const rel of paths) {
       const info = await stat(this.vault.abs(rel));
       const entry = this.entries.get(rel);
-      if (entry && entry.mtimeMs === info.mtimeMs && entry.size === info.size) continue;
+      const statChanged = !entry || entry.mtimeMs !== info.mtimeMs || entry.size !== info.size;
+      // The hash is the authority on whether content changed. An mtime+size match is NOT trusted to
+      // skip the read: a content edit that preserves byte length can land on the same mtime (coarse
+      // filesystem resolution, or an mtime-preserving restore), so we read and compare hashes rather
+      // than let such an edit slip past unindexed.
       const note = await this.vault.readNote(rel);
-      stats.parsed++;
       if (entry && entry.hash === note.hash) {
-        // Touched but identical once line endings are normalized: nothing to re-index.
-        this.entries.set(rel, { ...entry, mtimeMs: info.mtimeMs, size: info.size });
+        // Content unchanged. If only the stat moved (e.g. a line-ending touch), refresh it so later
+        // sweeps see the file as settled; `parsed` counts a file that looked stale but wasn't.
+        if (statChanged) {
+          this.entries.set(rel, { ...entry, mtimeMs: info.mtimeMs, size: info.size });
+          stats.parsed++;
+        }
         continue;
       }
+      // New file or genuinely changed content.
+      stats.parsed++;
       // Archived notes are excluded from search (and contribute no backlinks); if one was indexed, drop it.
       const archived = note.status === "archived";
-      if (entry && !entry.archived) {
-        this.mini.discard(rel);
-        stats.updated++;
-      } else if (!entry) {
-        stats.added++;
-      } else {
-        stats.updated++;
-      }
+      const wasIndexed = !!entry && !entry.archived;
+      if (wasIndexed) this.mini.discard(rel);
       if (!archived) this.mini.add(toDoc(note));
+      if (wasIndexed && archived) stats.removed++; // active → archived: left the index
+      else if (!wasIndexed && !archived) stats.added++; // new, or archived → active: entered the index
+      else if (wasIndexed) stats.updated++; // active → active: re-indexed in place
+      // (!wasIndexed && archived): archived → archived content edit — nothing enters or leaves the index
       this.entries.set(rel, {
         id: note.id,
         mtimeMs: info.mtimeMs,

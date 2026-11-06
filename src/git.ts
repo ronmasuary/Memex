@@ -95,6 +95,9 @@ export class GitQueue {
   /** Stage everything and commit (used for the vault's initial commit). */
   commitAll(message: string): Promise<string> {
     return this.queue.run(async () => {
+      // Ensure a committer identity itself (idempotent/memoized) rather than relying on a prior
+      // `init` having run, so a commit can never land with an unset or stale global identity.
+      await this.ensureIdentity();
       await this.git.add(["-A"]);
       await this.git.commit(message);
       return (await this.git.revparse(["HEAD"])).trim();
