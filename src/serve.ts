@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { detectConflicts, findConflictPairs, type ConflictNote, type ConflictWarning } from "./conflicts.js";
+import { detectConflicts, findConflictPairs, toConflictNote, type ConflictWarning } from "./conflicts.js";
 import { buildBacklinks, extractWikilinks } from "./links.js";
 import { SearchIndex } from "./search.js";
 import { slugify } from "./slug.js";
@@ -83,13 +83,34 @@ export interface HandlerOptions {
 export type NextFn = (err?: unknown) => void;
 export type RequestHandler = (req: http.IncomingMessage, res: http.ServerResponse, next?: NextFn) => void;
 
-function toConflictNote(n: Note): ConflictNote {
-  return { id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated };
-}
-
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 const MAX_BODY_BYTES = 64 * 1024;
 const ACTIONS = new Set<ResolveAction>(["keep_a", "keep_b", "keep_both"]);
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|::1)$/i;
+
+/** An error that carries the HTTP status the client should see (the message stays client-safe). */
+class HttpError extends Error {
+  constructor(readonly statusCode: number, message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Canonical `loopback:<port>` for a loopback `host[:port]` authority, or null if it is not loopback.
+ * localhost, 127.0.0.1 and [::1] all name the same machine, so they collapse to one token — a same-machine
+ * request is same-origin whichever alias the Host and Origin happen to use, as long as the port matches.
+ */
+function loopbackAuthority(authority: string): string | null {
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(authority.trim());
+  if (!m) return null;
+  const hostname = (m[1] ?? "").replace(/^\[|\]$/g, "");
+  return LOOPBACK_HOST.test(hostname) ? `loopback:${m[2] ?? ""}` : null;
+}
+
+/** True only for an exact `application/json` media type (parameters like `; charset=utf-8` are allowed). */
+function isJsonContentType(value: string | undefined): boolean {
+  return (value ?? "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
 
 /**
  * The write gate for the one mutating endpoint. The server is otherwise read-only, so this is deliberately strict:
@@ -99,11 +120,17 @@ const ACTIONS = new Set<ResolveAction>(["keep_a", "keep_b", "keep_both"]);
  */
 function writeGate(req: http.IncomingMessage): string | null {
   if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) return "writes are only accepted from loopback";
-  const host = req.headers.host ?? "";
-  if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host)) return "unexpected Host header";
+  const hostAuth = loopbackAuthority(req.headers.host ?? "");
+  if (!hostAuth) return "unexpected Host header";
   const origin = req.headers.origin;
-  if (origin !== undefined && (!URL.canParse(origin) || new URL(origin).host !== host)) return "cross-origin write refused";
-  if (!(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return "content-type must be application/json";
+  if (origin !== undefined) {
+    // Compare canonical loopback authorities so a localhost/127.0.0.1 alias on the same port is accepted,
+    // not falsely refused, while a genuinely different host or port is still rejected.
+    if (!URL.canParse(origin) || loopbackAuthority(new URL(origin).host) !== hostAuth) {
+      return "cross-origin write refused";
+    }
+  }
+  if (!isJsonContentType(req.headers["content-type"])) return "content-type must be application/json";
   return null;
 }
 
@@ -112,10 +139,18 @@ async function readJson(req: http.IncomingMessage): Promise<unknown> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new Error("request body too large");
+    if (size > MAX_BODY_BYTES) {
+      // Stop reading and tear down the connection so an oversize upload can't keep streaming into memory.
+      req.destroy();
+      throw new HttpError(413, "request body too large");
+    }
     chunks.push(chunk as Buffer);
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } catch {
+    throw new HttpError(400, "body is not valid JSON");
+  }
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -258,7 +293,8 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
     try {
       body = await readJson(req);
     } catch (err) {
-      return sendJson(res, 400, { error: (err as Error).message });
+      const status = err instanceof HttpError ? err.statusCode : 400;
+      return sendJson(res, status, { error: (err as Error).message });
     }
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
       return sendJson(res, 400, { error: "body must be a JSON object" });
@@ -301,8 +337,9 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
         { title, body: noteBody, project, tags, key: key === undefined ? undefined : (key as string | null) },
         { source: "web/ui", session: "web", why: why?.trim() || "saved from the web UI" },
       );
-      const others = (await loadNotes()).filter((n) => n.id !== result.note.id).map(toConflictNote);
-      const warnings: ConflictWarning[] = detectConflicts(toConflictNote(result.note), others);
+      // `writeNote` already read the whole vault to resolve the id; reuse those notes for
+      // contradiction detection instead of scanning the vault a second time.
+      const warnings: ConflictWarning[] = detectConflicts(toConflictNote(result.note), result.others.map(toConflictNote));
       const saved = result.note;
       return sendJson(res, 200, {
         note: { ...summarize(saved), key: saved.key ?? null, created: saved.created, body: saved.body },
@@ -377,7 +414,9 @@ export function createHandler(opts: HandlerOptions): RequestHandler {
           try {
             return await handleWrite(req, res, writer);
           } catch (err) {
-            return sendJson(res, 500, { error: (err as Error).message });
+            // Keep the detail server-side; the client only needs to know the write failed.
+            console.error("memex serve: write handler failed:", err);
+            return sendJson(res, 500, { error: "internal error" });
           }
         }
       }

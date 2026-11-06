@@ -151,7 +151,7 @@ export async function run(argv: string[], io: Io = processIo): Promise<number> {
           args: rest,
           options: { vault: { type: "string" }, port: { type: "string" } },
         });
-        const port = values.port ? Number(values.port) : DEFAULT_PORT;
+        const port = values.port ? Number.parseInt(values.port, 10) : DEFAULT_PORT;
         if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("--port must be 0-65535");
         const server = await startServer({ vault: resolveVault(values.vault), port, webDist: DEFAULT_WEB_DIST });
         const addr = server.address();

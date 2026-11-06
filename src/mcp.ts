@@ -6,7 +6,7 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { detectConflicts, type ConflictNote } from "./conflicts.js";
+import { detectConflicts, toConflictNote } from "./conflicts.js";
 import { slugify } from "./slug.js";
 import { SearchIndex } from "./search.js";
 import { Vault, type Note } from "./vault.js";
@@ -27,10 +27,6 @@ type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean
 
 const text = (t: string): ToolResult => ({ content: [{ type: "text", text: t }] });
 const fail = (t: string): ToolResult => ({ content: [{ type: "text", text: t }], isError: true });
-
-function toConflictNote(n: Note): ConflictNote {
-  return { id: n.id, title: n.title, key: n.key, project: n.project, status: n.status, body: n.body, updated: n.updated };
-}
 
 function clamp(value: number | undefined, fallback: number, max: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
@@ -72,10 +68,9 @@ export function createServer(vault: Vault): McpServer {
           { title, body, project, tags, key },
           { source, session, why },
         );
-        const others = (await Promise.all((await vault.listNotePaths()).map((p) => vault.readNote(p))))
-          .filter((n) => n.id !== result.note.id)
-          .map(toConflictNote);
-        const warnings = detectConflicts(toConflictNote(result.note), others);
+        // `writeNote` already read the whole vault to resolve the id; reuse those notes for
+        // contradiction detection instead of scanning the vault a second time.
+        const warnings = detectConflicts(toConflictNote(result.note), result.others.map(toConflictNote));
         const verb = result.created ? "Saved" : result.revived ? "Restored from archive and updated" : "Updated";
         const lines = [`${verb} note ${result.note.id} (${result.note.path}).`];
         if (result.commit) lines.push(`Commit: ${result.commit.slice(0, 7)}`);
