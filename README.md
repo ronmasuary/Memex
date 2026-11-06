@@ -8,9 +8,9 @@ Your AI agent's memory is a git repo it can reason about. Every fact records who
 ![node](https://img.shields.io/badge/node-%3E%3D20-3c873a)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 
-![The Memex Conflicts inbox: two notes that disagree about a storage choice, side by side, with Keep A, Keep B and Keep both](docs/conflicts-inbox.png)
+![Memex in about ten seconds: the project graph, a contradicting note landing in the Conflicts inbox side by side with the one it disagrees with, and Keep B resolving it in a single commit](docs/demo.gif)
 
-<!-- TODO(owner): replace or supplement the screenshot above with a short GIF: an agent calls remember, gets the contradiction warning, and the note lands in the inbox. -->
+![The Memex Conflicts inbox: two notes that disagree about a storage choice, side by side, with Keep A, Keep B and Keep both](docs/conflicts-inbox.png)
 
 Memex is a git-backed markdown knowledge base that any [MCP](https://modelcontextprotocol.io) host (Claude Desktop, Cursor, your own agent) can read and write. Your notes are plain `.md` files you own, not rows in someone's database. How it works, in one page: [ARCHITECTURE.md](ARCHITECTURE.md).
 
