@@ -6,7 +6,7 @@ type IconName =
 
 export function Icon({ name, className, style }: { name: IconName; className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={`i${className ? ` ${className}` : ""}`} style={style} aria-hidden="true">
+    <svg viewBox="0 0 24 24" className={`i${className ? ` ${className}` : ""}`} style={style} aria-hidden="true">
       <use href={`#i-${name}`} />
     </svg>
   );
