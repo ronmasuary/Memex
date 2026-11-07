@@ -8,7 +8,7 @@ Your AI agent's memory is a git repo it can reason about. Every fact records who
 ![node](https://img.shields.io/badge/node-%3E%3D20-3c873a)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 
-![Memex in about ten seconds: the project graph, a contradicting note landing in the Conflicts inbox side by side with the one it disagrees with, and Keep B resolving it in a single commit](docs/demo.gif)
+![Memex in about fourteen seconds: the project graph, a contradicting note landing in the Conflicts inbox side by side with the one it disagrees with, and Keep B resolving it in a single commit](docs/demo.gif)
 
 ![The Memex Conflicts inbox: two notes that disagree about a storage choice, side by side, with Keep A, Keep B and Keep both](docs/conflicts-inbox.png)
 
