@@ -30,6 +30,17 @@ All four run in CI on every PR, across Ubuntu, macOS and Windows.
   `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`, `test: ...`.
 - `main` is protected: all changes land via PR with green CI, no direct pushes.
 
+## Dependencies
+
+- **`@types/node` tracks the oldest supported Node runtime, not the newest
+  published major.** We target Node 20 (`engines`, and the CI matrix runs node 20
+  and 22), so `@types/node` stays on `^20`. Bumping it to a higher major would make
+  TypeScript accept APIs that don't exist on Node 20 at runtime — the types would
+  describe a newer standard library than we actually run on. Only move it when the
+  Node floor itself moves, and change `engines` and the CI matrix in the same PR.
+  (Dependabot will periodically propose the newer major; close those as
+  "not planned" with this reason.)
+
 ## Before a large PR
 
 Open an issue first describing what you want to change, so effort isn't wasted
