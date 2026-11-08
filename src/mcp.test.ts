@@ -97,35 +97,40 @@ describe("memex MCP server (in-memory transport)", () => {
     expect(await call("get_backlinks", { id: "storage-decision" })).toContain("storage-final");
   });
 
-  it("remember nudges toward an existing similar key, and stays silent otherwise", async () => {
-    // Project "alpha" already uses key "storage".
-    await call("remember", { title: "Datastore choice", body: "We use Postgres.", project: "alpha", key: "storage" });
+  it("remember nudges toward an existing equivalent key, and stays silent otherwise", async () => {
+    // Project "alpha" already uses key "data-store".
+    await call("remember", { title: "Datastore choice", body: "We use Postgres.", project: "alpha", key: "data-store" });
 
-    // A new note under a similar-but-different key in the same project gets a NUDGE (no key rewrite).
+    // A new note under a separator-only variant of that key gets a NUDGE (no key rewrite).
     const nudged = await call("remember", {
-      title: "Storage choice revisited",
+      title: "Datastore revisited",
       body: "We use SQLite.",
       project: "alpha",
-      key: "storage-choice",
+      key: "datastore",
     });
-    expect(nudged).toContain("Saved note storage-choice-revisited");
+    expect(nudged).toContain("Saved note datastore-revisited");
     expect(nudged).toContain("NUDGE:");
-    expect(nudged).toContain('key "storage"');
+    expect(nudged).toContain('key "data-store"');
     // The save still used the key as given — nothing was auto-rewritten.
-    expect(await call("read_note", { id: "storage-choice-revisited" })).toContain("key: storage-choice");
+    expect(await call("read_note", { id: "datastore-revisited" })).toContain("key: datastore");
 
-    // Unrelated key in a fresh project: no similar key exists, so no nudge.
+    // A more-specific key is a different fact, not a spelling variant: no nudge (under-suggest).
+    const subset = await call("remember", { title: "Datastore timeout", body: "5s.", project: "alpha", key: "data-store-timeout" });
+    expect(subset).not.toContain("NUDGE");
+
+    // Unrelated key in a fresh project: no equivalent key exists, so no nudge.
     const quiet = await call("remember", { title: "Release cadence", body: "Ship weekly.", project: "beta", key: "schedule" });
     expect(quiet).not.toContain("NUDGE");
 
-    // Same similar key but a different project: no nudge (keys are per-project).
-    const otherProject = await call("remember", { title: "Elsewhere", body: "n/a", project: "gamma", key: "storage-choice" });
+    // Same equivalent key but a different project: no nudge (keys are per-project).
+    const otherProject = await call("remember", { title: "Elsewhere", body: "n/a", project: "gamma", key: "datastore" });
     expect(otherProject).not.toContain("NUDGE");
 
-    // Reusing the exact existing key in a project whose only key is that one: no nudge (it already groups).
-    await call("remember", { title: "Exact first", body: "We use Postgres.", project: "delta", key: "storage" });
-    const exact = await call("remember", { title: "Exact second", body: "We use SQLite.", project: "delta", key: "storage" });
-    expect(exact).not.toContain("NUDGE");
+    // Body-only update of an existing keyed note (no key arg this call): the key is inherited, and the
+    // nudge must NOT re-emit even though project "alpha" still holds the equivalent "data-store" key.
+    const bodyOnly = await call("remember", { title: "Datastore revisited", body: "We use DuckDB now." , project: "alpha" });
+    expect(bodyOnly).toContain("Updated note datastore-revisited");
+    expect(bodyOnly).not.toContain("NUDGE");
   });
 
   it("remember revives an archived note and says it was restored", async () => {

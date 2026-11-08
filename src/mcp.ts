@@ -83,7 +83,9 @@ export function createServer(vault: Vault): McpServer {
         }
         // Key hygiene: if this project already uses a different-but-similar key, nudge toward it so
         // same-topic notes share a key and the detector can pair them. Advisory; the save stands.
-        const similar = suggestExistingKey(result.note.key, others, result.note.project);
+        // Only when the author PASSES a key in this call — a body-only update inherits the stored key
+        // and must not re-emit the nudge on every unrelated edit.
+        const similar = key === undefined ? null : suggestExistingKey(key, others, result.note.project);
         if (similar) {
           lines.push(
             "",
