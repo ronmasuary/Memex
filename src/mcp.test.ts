@@ -97,6 +97,37 @@ describe("memex MCP server (in-memory transport)", () => {
     expect(await call("get_backlinks", { id: "storage-decision" })).toContain("storage-final");
   });
 
+  it("remember nudges toward an existing similar key, and stays silent otherwise", async () => {
+    // Project "alpha" already uses key "storage".
+    await call("remember", { title: "Datastore choice", body: "We use Postgres.", project: "alpha", key: "storage" });
+
+    // A new note under a similar-but-different key in the same project gets a NUDGE (no key rewrite).
+    const nudged = await call("remember", {
+      title: "Storage choice revisited",
+      body: "We use SQLite.",
+      project: "alpha",
+      key: "storage-choice",
+    });
+    expect(nudged).toContain("Saved note storage-choice-revisited");
+    expect(nudged).toContain("NUDGE:");
+    expect(nudged).toContain('key "storage"');
+    // The save still used the key as given — nothing was auto-rewritten.
+    expect(await call("read_note", { id: "storage-choice-revisited" })).toContain("key: storage-choice");
+
+    // Unrelated key in a fresh project: no similar key exists, so no nudge.
+    const quiet = await call("remember", { title: "Release cadence", body: "Ship weekly.", project: "beta", key: "schedule" });
+    expect(quiet).not.toContain("NUDGE");
+
+    // Same similar key but a different project: no nudge (keys are per-project).
+    const otherProject = await call("remember", { title: "Elsewhere", body: "n/a", project: "gamma", key: "storage-choice" });
+    expect(otherProject).not.toContain("NUDGE");
+
+    // Reusing the exact existing key in a project whose only key is that one: no nudge (it already groups).
+    await call("remember", { title: "Exact first", body: "We use Postgres.", project: "delta", key: "storage" });
+    const exact = await call("remember", { title: "Exact second", body: "We use SQLite.", project: "delta", key: "storage" });
+    expect(exact).not.toContain("NUDGE");
+  });
+
   it("remember revives an archived note and says it was restored", async () => {
     await call("remember", { title: "Scratch fact", body: "first take", project: "memex" });
     await vault.archiveNote("scratch-fact", { source: "test", why: "cleanup" });
