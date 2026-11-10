@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { detectConflicts, toConflictNote } from "./conflicts.js";
+import { suggestExistingKey } from "./keys.js";
 import { slugify } from "./slug.js";
 import { SearchIndex } from "./search.js";
 import { Vault, type Note } from "./vault.js";
@@ -50,6 +51,7 @@ export function createServer(vault: Vault): McpServer {
         "Save or update a note in the user's persistent memory. Re-using a title updates that note. " +
         "Pass a stable `key` for a fact that should have one current value (e.g. 'storage-choice'); " +
         "if a different active note already holds a different value for that key, the result warns you. " +
+        "If the project already uses a different-but-similar key, the result nudges you to reuse it. " +
         "To replace an older note on purpose, add a line 'Supersedes: [[old-id]]' to the body.",
       inputSchema: {
         title: z.string().min(1).describe("Short descriptive title; also determines the note id."),
@@ -70,13 +72,26 @@ export function createServer(vault: Vault): McpServer {
         );
         // `writeNote` already read the whole vault to resolve the id; reuse those notes for
         // contradiction detection instead of scanning the vault a second time.
-        const warnings = detectConflicts(toConflictNote(result.note), result.others.map(toConflictNote));
+        const others = result.others.map(toConflictNote);
+        const warnings = detectConflicts(toConflictNote(result.note), others);
         const verb = result.created ? "Saved" : result.revived ? "Restored from archive and updated" : "Updated";
         const lines = [`${verb} note ${result.note.id} (${result.note.path}).`];
         if (result.commit) lines.push(`Commit: ${result.commit.slice(0, 7)}`);
         for (const w of warnings) {
           lines.push("", `WARNING: ${w.message}`);
           lines.push(`Once the user decides, settle it with resolve_conflict (a: "${w.id}", b: "${result.note.id}").`);
+        }
+        // Key hygiene: if this project already uses a different-but-similar key, nudge toward it so
+        // same-topic notes share a key and the detector can pair them. Advisory; the save stands.
+        // Only when the author PASSES a key in this call — a body-only update inherits the stored key
+        // and must not re-emit the nudge on every unrelated edit.
+        const similar = key === undefined ? null : suggestExistingKey(key, others, result.note.project);
+        if (similar) {
+          lines.push(
+            "",
+            `NUDGE: this project already uses key "${similar}" for related notes; reusing it lets Memex catch contradictions. ` +
+              `Re-save with key "${similar}" if they mean the same thing.`,
+          );
         }
         return text(lines.join("\n"));
       } catch (err) {
