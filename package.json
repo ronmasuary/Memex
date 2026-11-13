@@ -19,11 +19,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/markdown-it": "^14.2.0",
-    "@types/node": "^20.19.9",
+    "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.72.1",
-    "vitest": "^3.2.4"
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
