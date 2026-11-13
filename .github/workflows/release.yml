@@ -106,7 +106,7 @@ jobs:
           name: memex-release
           path: out
 
-      - uses: softprops/action-gh-release@v3.0.3
+      - uses: softprops/action-gh-release@v3.0.4
         with:
           files: out/*
           generate_release_notes: true
