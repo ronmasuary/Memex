@@ -1,0 +1,10 @@
+node_modules
+dist
+web
+.git
+.github
+.claude
+docs
+*.log
+.DS_Store
+.memex
