@@ -112,3 +112,9 @@ Every tool caps its output so a memory lookup never floods the host's context.
 ## Contributing
 
 Issues and ideas welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Licensed [MIT](LICENSE) © Ron Masuary.
+
+## Contact
+
+Built by **Ron Masuary** — [ronmas2@gmail.com](mailto:ronmas2@gmail.com) · [@ronmasuary](https://github.com/ronmasuary)
+
+Questions about the design, bug reports, or work — all welcome.
