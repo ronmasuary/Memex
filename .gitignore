@@ -6,3 +6,6 @@ web/dist/
 
 # rebuildable search index — never commit this
 .memex/
+
+# local agent tooling: personal settings, hooks, and app-managed git worktrees
+.claude/
