@@ -8,6 +8,18 @@ updates:
       npm-deps:
         patterns:
           - "*"
+    # Major bumps of these move the toolchain/runtime floor and get a
+    # deliberate standalone PR (as eslint 10 did in #3), not a batched
+    # dev-dep bump. @types/node tracks the oldest supported Node runtime
+    # (Node 20) per CONTRIBUTING.md, so it stays within 20.x. Minors and
+    # patches for all three still flow through the npm-deps group.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
